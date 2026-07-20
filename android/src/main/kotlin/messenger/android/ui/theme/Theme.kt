@@ -13,8 +13,10 @@ import messenger.android.data.ThemeMode
 private val VoronLightColors = lightColorScheme(
     primary = VoronViolet,
     onPrimary = VoronSurface,
-    secondary = VoronLavender,
+    secondary = VoronTeal,
     onSecondary = VoronSurface,
+    tertiary = VoronBronze,
+    onTertiary = VoronSurface,
     background = VoronBackground,
     onBackground = VoronTextPrimary,
     surface = VoronSurface,
@@ -27,9 +29,11 @@ private val VoronLightColors = lightColorScheme(
 
 private val VoronDarkColors = darkColorScheme(
     primary = VoronViolet,
-    onPrimary = VoronDarkTextPrimary,
-    secondary = VoronLavender,
+    onPrimary = VoronDarkBackground,
+    secondary = VoronTeal,
     onSecondary = VoronDarkBackground,
+    tertiary = VoronBronze,
+    onTertiary = VoronDarkBackground,
     background = VoronDarkBackground,
     onBackground = VoronDarkTextPrimary,
     surface = VoronDarkSurface,

@@ -87,7 +87,24 @@ class GroupControlLog(val groupId: ByteArray) {
         state = computed
     }
 
-    private fun applyIfAuthorized(state: GroupState, event: GroupControlEvent): GroupState {
+    // CRASH/DoS: every branch below decodes event.payload with a fixed-length ByteBuffer read and
+    // no bounds check of its own -- a payload that's the wrong length (an old build's persisted
+    // event replayed against a newer, incompatible wire shape; or a malicious/buggy peer's
+    // malformed-but-validly-signed event, since verifySignature only proves who signed it, not
+    // that the payload decodes) throws straight out of decode. Since recompute() replays the
+    // *entire* canonical path on every ingest() and store.load() replays the whole log on every
+    // process start, one such event didn't just get skipped -- it permanently wedged this log (and,
+    // for GroupManager's persisted logs, crashed the app on every single future launch). Treating a
+    // decode failure the same as "not authorized" (state unchanged) keeps this consistent with
+    // every other rejection path below instead of being the one way a single bad event takes the
+    // whole log down.
+    private fun applyIfAuthorized(state: GroupState, event: GroupControlEvent): GroupState = try {
+        applyIfAuthorizedUnsafe(state, event)
+    } catch (e: Exception) {
+        state
+    }
+
+    private fun applyIfAuthorizedUnsafe(state: GroupState, event: GroupControlEvent): GroupState {
         val signerHex = event.signerDhKey.toHex()
         // SECURITY: a GroupControlEvent's signerSigningPublicKey is otherwise just a self-declared
         // field — verifySignature() only proves internal self-consistency (whoever holds that

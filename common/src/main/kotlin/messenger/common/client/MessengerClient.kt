@@ -446,13 +446,29 @@ class MessengerClient(
         mutableTypingIndicators.tryEmit(envelope.peerStaticPublicKey)
     }
 
+    // SECURITY (2026-07-21): this used to carry an empty payload — just [peer key] with nothing
+    // proving who sent it. Unlike ROUTE/DELIVERY_ACK/etc., it can't be wrapped in e2ee.encrypt()
+    // (the whole reason we're sending it is that we hold *no* session with the recipient to
+    // encrypt under), so a malicious relay could forge this frame directly into any device's
+    // outgoing queue/mailbox with an arbitrary claimed sender, and handleSessionResetNotice would
+    // unconditionally drop that device's real session with the named peer — an at-will forced
+    // re-handshake DoS against any pair, no cryptographic capability needed. Signing with our own
+    // identity signing key instead — verified by the recipient against their already-pinned copy
+    // of it (same TOFU pin X3DH/GroupControlLog already rely on) — means forging this now requires
+    // that private key, which a relay never holds.
     private suspend fun sendSessionResetNotice(peerDhIdentityKey: ByteArray) {
-        val envelope = RoutingEnvelope.encode(peerDhIdentityKey, ByteArray(0))
+        val signature = Ed25519Signatures.sign(identity.signingIdentity.privateKey, peerDhIdentityKey)
+        val envelope = RoutingEnvelope.encode(peerDhIdentityKey, signature)
         outgoing.send(TransportFrame.encode(TransportFrame.SESSION_RESET_NOTICE, envelope))
     }
 
     private suspend fun handleSessionResetNotice(body: ByteArray) {
         val envelope = decodeEnvelopeOrNull(body, "session-reset notice") ?: return
+        val signingKey = e2ee.pinnedSigningIdentityKey(envelope.peerStaticPublicKey)
+        if (signingKey == null || !Ed25519Signatures.verify(signingKey, identity.dhIdentityPublicKey, envelope.payload)) {
+            logger.warn("dropping session-reset notice from ${envelope.peerStaticPublicKey.toHex()}: missing/invalid signature")
+            return
+        }
         logger.info("peer ${envelope.peerStaticPublicKey.toHex()} lost its session with us; dropping ours too")
         e2ee.dropSession(envelope.peerStaticPublicKey)
         mutableSessionResetNotices.emit(envelope.peerStaticPublicKey)
@@ -490,12 +506,21 @@ class MessengerClient(
         outgoing.send(TransportFrame.encode(TransportFrame.PUBLISH_PREKEYS, PreKeyCodec.encodePublished(published)))
     }
 
+    // SECURITY/RELIABILITY: only handlePreKeysResult's happy path removed this entry — a relay
+    // that simply never answers a given FETCH_PREKEYS (or answers after the 10s timeout already
+    // fired) left it in `pendingFetches` forever, a slow memory leak bounded only by how many
+    // distinct peers this device ever tries to message while stonewalled. `finally` now always
+    // cleans up regardless of how this call ends.
     private suspend fun fetchBundle(peerDhIdentityKey: ByteArray): PreKeyBundle? {
         val hex = peerDhIdentityKey.toHex()
         val deferred = CompletableDeferred<PreKeyBundle?>()
         pendingFetches[hex] = deferred
-        outgoing.send(TransportFrame.encode(TransportFrame.FETCH_PREKEYS, peerDhIdentityKey))
-        return withTimeout(10_000) { deferred.await() }
+        try {
+            outgoing.send(TransportFrame.encode(TransportFrame.FETCH_PREKEYS, peerDhIdentityKey))
+            return withTimeout(10_000) { deferred.await() }
+        } finally {
+            pendingFetches.remove(hex, deferred)
+        }
     }
 
     /**

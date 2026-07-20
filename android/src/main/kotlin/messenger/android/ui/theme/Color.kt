@@ -2,66 +2,63 @@ package messenger.android.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Deep violet/indigo palette (matches the reference inbox mockup): near-black purple
-// background, a brighter violet used for selection/accent surfaces, and a vivid violet
-// primary for buttons/badges/links.
-val VoronBackground = Color(0xFFF4F2FA)
-val VoronSurface = Color(0xFFFFFFFF)
-val VoronSurfaceVariant = Color(0xFFE9E4F7)
+// 2026-07-21 rebrand: ports the marketing site's "corvid feather iridescence" identity
+// (violet/teal/bronze over warm near-black ink, cream "paper" for display text) into the app
+// itself, replacing the earlier generic violet/charcoal scheme. One fixed set of accent hues is
+// shared by both themes — light mode is "ink on paper", dark mode is "paper on ink" — rather than
+// each theme getting its own brighter/dimmer variant of the brand colors.
+val VoronViolet = Color(0xFF8B6FD6)
+val VoronTeal = Color(0xFF3FA79C)
+val VoronBronze = Color(0xFFB48A4E)
 
-val VoronTextPrimary = Color(0xFF1C1533)
-val VoronTextSecondary = Color(0xFF6B6285)
-val VoronDivider = Color(0xFFDED6F0)
-val VoronPlaceholderBar = Color(0xFFE3DCF5)
+// Light ("paper") theme: a warm parchment ground, not a flat white — keeps the editorial,
+// slightly bookish feel of the site's dark mode even where the OS forces a light background.
+val VoronBackground = Color(0xFFF3F0E9)
+val VoronSurface = Color(0xFFFBF9F5)
+val VoronSurfaceVariant = Color(0xFFEAE5D9)
 
-// 2026-07-19 rebrand: a slightly deeper, more blue-leaning violet than the original 7059C9 — reads
-// as a jewel-toned "corvid feather" hue rather than a flat purple, and gives the launcher icon's
-// blue/teal gradient (ic_launcher_foreground.xml) a real point of contact with the in-app accent
-// instead of belonging to an unrelated palette. Still an evolution of the same violet, not a
-// different hue family.
-val VoronViolet = Color(0xFF6C4FE0)
-val VoronVioletDark = Color(0xFF5A3FC4)
-val VoronLavender = Color(0xFF9B8CE6)
-val VoronLavenderDark = Color(0xFF7C6BD4)
+val VoronTextPrimary = Color(0xFF1C1A16)
+val VoronTextSecondary = Color(0xFF6E685F)
+val VoronDivider = Color(0xFFDCD5C6)
+val VoronPlaceholderBar = Color(0xFFE9E3D4)
 
-// Modern dark scheme: a very dark, slightly blue-tinted charcoal ground (#0F1419) with a distinctly
-// lighter card surface (#1A1F2E) and a lighter-still variant for incoming bubbles/chips — enough
-// step between the three that surfaces read as layered rather than flat, matching the 2025 refresh.
-val VoronDarkBackground = Color(0xFF0F1419)
-val VoronDarkSurface = Color(0xFF1A1F2E)
-val VoronDarkSurfaceVariant = Color(0xFF262D3D)
-val VoronDarkTextPrimary = Color(0xFFE8EAED)
-val VoronDarkTextSecondary = Color(0xFF8A8D93)
-val VoronDarkDivider = Color(0xFF262D3D)
+// Dark ("ink") theme: matches the site's --ink/--ink-2/--paper/--muted/--rule tokens directly, so
+// the app and the landing page read as the same object rather than two different products.
+val VoronDarkBackground = Color(0xFF0A0A0C)
+val VoronDarkSurface = Color(0xFF101014)
+val VoronDarkSurfaceVariant = Color(0xFF17171C)
+val VoronDarkTextPrimary = Color(0xFFE7E3DC)
+val VoronDarkTextSecondary = Color(0xFF8D8894)
+val VoronDarkDivider = Color(0xFF232228)
 
-val VoronError = Color(0xFFDC2626)
-val VoronErrorDark = Color(0xFFF87171)
+val VoronError = Color(0xFFB84A3E)
+val VoronErrorDark = Color(0xFFE08276)
 
-val VoronAvatarGradient = listOf(VoronViolet, VoronLavender)
+val VoronAvatarGradient = listOf(VoronViolet, VoronTeal, VoronBronze)
 
-// Deliberately neutral gray (not violet-tinted) so bottom sheets read as a distinct floating
-// layer rather than blending into the page's own colored background/surface.
-val VoronSheetBackground = Color(0xFFE7E6EA)
-val VoronSheetBackgroundDark = Color(0xFF242229)
+// Deliberately neutral (not accent-tinted) so bottom sheets read as a distinct floating layer
+// rather than blending into the page's own background/surface.
+val VoronSheetBackground = Color(0xFFEAE6DC)
+val VoronSheetBackgroundDark = Color(0xFF17171C)
 
 // Decorative icon circles/tints *inside* sheets (avatar placeholders, purely functional action
-// icons) — kept neutral gray so they don't compete with either the sheet's primary button or the
+// icons) — kept neutral so they don't compete with either the sheet's primary button or the
 // semantic status colors below.
-val VoronNeutralIconContainer = Color(0xFFD6D4DA)
-val VoronNeutralIconContainerDark = Color(0xFF34323C)
-val VoronNeutralIcon = Color(0xFF5B5966)
-val VoronNeutralIconDark = Color(0xFFB6B4BE)
+val VoronNeutralIconContainer = Color(0xFFDDD7C9)
+val VoronNeutralIconContainerDark = Color(0xFF232228)
+val VoronNeutralIcon = Color(0xFF6E685F)
+val VoronNeutralIconDark = Color(0xFFB0ABA0)
 
-// Status icons carry their own fixed meaning across the whole app (pin, verified, encrypted,
-// delivered) instead of all sharing the violet accent or all going flat gray — each gets one
-// consistent, recognizable color everywhere it appears.
-val VoronPin = Color(0xFFB07C00)
-val VoronPinDark = Color(0xFFFBBF24)
-val VoronVerified = Color(0xFF2563EB)
-val VoronVerifiedDark = Color(0xFF60A5FA)
-// Calmer, less vivid green than a full 4ADE80 ("чуть меньше зелёного") — still clearly the
-// "encrypted/seen" green, just less saturated so it doesn't shout on the dark ground.
-val VoronEncrypted = Color(0xFF2F9E63)
-val VoronEncryptedDark = Color(0xFF5CC98C)
-val VoronDelivered = Color(0xFF0D9488)
-val VoronDeliveredDark = Color(0xFF2DD4BF)
+// Status icons each draw from the same three brand hues instead of reaching for unrelated
+// colors (the old scheme's blue "verified" and green "encrypted" belonged to no particular
+// palette) — pin/verified/encrypted/delivered now read as one family, not four accidents.
+val VoronPin = VoronBronze
+val VoronPinDark = Color(0xFFCBA268)
+val VoronVerified = VoronViolet
+val VoronVerifiedDark = Color(0xFFA894E3)
+val VoronEncrypted = VoronTeal
+val VoronEncryptedDark = Color(0xFF5CC0B4)
+// Deliberately the quiet neutral, not a fourth accent hue: "delivered" is a passive, low-emphasis
+// state (unlike pin/verified/encrypted, which are things a user actively cares about noticing).
+val VoronDelivered = Color(0xFF8D8577)
+val VoronDeliveredDark = Color(0xFF8D8894)

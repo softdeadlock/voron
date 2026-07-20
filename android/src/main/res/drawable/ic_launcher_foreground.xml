@@ -5,9 +5,11 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Raven silhouette, gradient-tinted body: blue -> violet -> teal, echoing the iridescent
-         sheen real raven feathers show in light. The violet center stop ties this directly to the
-         in-app accent (ui/theme/Color.kt VoronViolet) instead of being an unrelated blue/teal mark. -->
+    <!-- Raven silhouette, gradient-tinted body: violet -> teal -> bronze, the same three-hue
+         "corvid feather iridescence" gradient as the marketing site's hero (see project/index.html's
+         violet/teal/bronze tokens) and ui/theme/Color.kt's VoronViolet/VoronTeal/VoronBronze, so
+         the launcher icon, the in-app accent, and the site are one identity instead of three
+         loosely related color sets. -->
     <path android:pathData="M32.4,67 C32.4,43.2 51.8,30.2 67,36.7 C77.8,41 84.2,51.8 79.9,62.6 C75.6,73.4 60.5,77.8 47.5,73.4 C38.9,70.2 32.4,71.3 32.4,67 Z">
         <aapt:attr name="android:fillColor">
             <gradient
@@ -16,16 +18,16 @@
                 android:startY="30"
                 android:endX="82"
                 android:endY="78"
-                android:startColor="#3D5FE0"
-                android:centerColor="#6C4FE0"
-                android:endColor="#1FA394" />
+                android:startColor="#8B6FD6"
+                android:centerColor="#3FA79C"
+                android:endColor="#B48A4E" />
         </aapt:attr>
     </path>
     <path
-        android:fillColor="#4A3FC0"
+        android:fillColor="#7A5FC0"
         android:pathData="M79.9,49.7 L97.2,54 L78.8,60.5 Z" />
     <path
-        android:fillColor="#1B8F82"
+        android:fillColor="#B48A4E"
         android:pathData="M36.7,69.1 C19.4,75.6 8.6,86.4 4.3,97.2 C17.3,92.9 30.2,84.2 41,75.6 Z" />
     <path
         android:fillColor="#FFFFFF"
