@@ -1,0 +1,68 @@
+[versions]
+kotlin = "2.1.0"
+ktor = "3.0.3"
+noise = "0.1.1"
+logback = "1.5.18"
+kotlinx-coroutines = "1.9.0"
+junit = "5.11.3"
+junit-platform = "1.11.3"
+agp = "8.13.2"
+compose-bom = "2026.06.01"
+androidx-activity-compose = "1.13.0"
+androidx-core-ktx = "1.17.0"
+androidx-lifecycle-runtime-ktx = "2.9.4"
+androidx-navigation-compose = "2.9.5"
+androidx-security-crypto = "1.1.0-alpha06"
+androidx-biometric = "1.1.0"
+stream-webrtc = "1.1.1"
+unifiedpush = "3.0.5"
+postgresql = "42.7.4"
+hikaricp = "5.1.0"
+zxing = "3.5.3"
+zxing-embedded = "4.3.0"
+jsoup = "1.18.1"
+
+[libraries]
+ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
+ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
+ktor-server-websockets = { module = "io.ktor:ktor-server-websockets", version.ref = "ktor" }
+ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
+ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor" }
+ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
+noise-java = { module = "org.signal.forks:noise-java", version.ref = "noise" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core-ktx" }
+androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "androidx-lifecycle-runtime-ktx" }
+androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "androidx-lifecycle-runtime-ktx" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
+androidx-compose-ui = { module = "androidx.compose.ui:ui" }
+androidx-compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
+androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
+androidx-compose-foundation = { module = "androidx.compose.foundation:foundation" }
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "androidx-navigation-compose" }
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "androidx-security-crypto" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "androidx-biometric" }
+stream-webrtc-android = { module = "io.getstream:stream-webrtc-android", version.ref = "stream-webrtc" }
+unifiedpush-connector = { module = "org.unifiedpush.android:connector", version.ref = "unifiedpush" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
+zxing-android-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxing-embedded" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

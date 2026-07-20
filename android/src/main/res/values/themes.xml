@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      windowBackground matches VoronTheme's Compose background exactly (light/dark via the
+      values-night variant of voron_window_background) so the native window shown during
+      Activity startup — before Compose has drawn a single frame — doesn't flash white/mismatched
+      in dark mode. This is what the OS paints for that first instant, not Compose.
+    -->
+    <style name="Theme.Voron" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/voron_window_background</item>
+    </style>
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Must match VoronDarkBackground (ui/theme/Color.kt) so the native pre-Compose window
+         background doesn't flash a different dark shade before the Compose theme takes over. -->
+    <color name="voron_window_background">#FF0F1419</color>
+</resources>
