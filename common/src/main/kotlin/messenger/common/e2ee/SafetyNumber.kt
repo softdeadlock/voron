@@ -30,7 +30,14 @@ object SafetyNumber {
         val (dh1, dh2) = if (aFirst) keyA to keyB else keyB to keyA
         val (sign1, sign2) = if (aFirst) signingKeyA to signingKeyB else signingKeyB to signingKeyA
         val digest = MessageDigest.getInstance("SHA-256")
-        val h1 = digest.digest(dh1 + (sign1 ?: ByteArray(0)) + dh2 + (sign2 ?: ByteArray(0)))
+        // A presence byte ahead of each signing key, rather than concatenating raw bytes (or
+        // nothing, when null) directly -- otherwise "signing key omitted" and "signing key present
+        // but zero-length" hash identically, and every field boundary is implicit in fixed lengths
+        // that happen to hold today rather than stated in the input itself.
+        val h1 = digest.digest(
+            dh1 + presenceTag(sign1) + (sign1 ?: ByteArray(0)) +
+                dh2 + presenceTag(sign2) + (sign2 ?: ByteArray(0)),
+        )
         val h2 = digest.digest(h1)
         val combined = h1 + h2
         val sb = StringBuilder(DIGIT_COUNT)
@@ -43,4 +50,6 @@ object SafetyNumber {
 
     /** Splits into groups of 5 digits for display, e.g. "12345 67890 …". */
     fun format(digits: String): String = digits.chunked(5).joinToString(" ")
+
+    private fun presenceTag(key: ByteArray?): ByteArray = byteArrayOf(if (key != null) 1 else 0)
 }

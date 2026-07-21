@@ -18,7 +18,7 @@ class GroupInviteTest {
         val signingKeyPair = Ed25519Signatures.generateKeyPair()
         val expiry = 1_800_000_000_000L
 
-        val link = GroupInvite.create(groupId, inviterDhKey, signingKeyPair, expiry)
+        val link = GroupInvite.create(groupId, inviterDhKey, signingKeyPair, expiry, Random.nextBytes(32))
         val parsed = requireNotNull(GroupInvite.parse(link))
 
         assertArrayEquals(groupId, parsed.groupId)
@@ -29,7 +29,7 @@ class GroupInviteTest {
 
     @Test
     fun `an invite is expired once now is past its expiry`() {
-        val link = GroupInvite.create(Random.nextBytes(GROUP_ID_LENGTH), Random.nextBytes(32), Ed25519Signatures.generateKeyPair(), 1000L)
+        val link = GroupInvite.create(Random.nextBytes(GROUP_ID_LENGTH), Random.nextBytes(32), Ed25519Signatures.generateKeyPair(), 1000L, Random.nextBytes(32))
         val parsed = requireNotNull(GroupInvite.parse(link))
 
         assertFalse(parsed.isExpired(999L))
@@ -40,7 +40,7 @@ class GroupInviteTest {
     @Test
     fun `a tampered invite fails signature verification`() {
         val groupId = Random.nextBytes(GROUP_ID_LENGTH)
-        val link = GroupInvite.create(groupId, Random.nextBytes(32), Ed25519Signatures.generateKeyPair(), 1_800_000_000_000L)
+        val link = GroupInvite.create(groupId, Random.nextBytes(32), Ed25519Signatures.generateKeyPair(), 1_800_000_000_000L, Random.nextBytes(32))
         val parsed = requireNotNull(GroupInvite.parse(link))
 
         // Forge an invite claiming the same signing key but a different group id.
@@ -49,6 +49,7 @@ class GroupInviteTest {
             inviterDhKey = parsed.inviterDhKey,
             inviterSigningPublicKey = parsed.inviterSigningPublicKey,
             expiresAtMillis = parsed.expiresAtMillis,
+            genesisHash = parsed.genesisHash,
             signature = parsed.signature,
         )
 
@@ -60,7 +61,7 @@ class GroupInviteTest {
         val groupId = Random.nextBytes(GROUP_ID_LENGTH)
         val inviterDhKey = Random.nextBytes(32)
         val signingKeyPair = Ed25519Signatures.generateKeyPair()
-        val link = GroupInvite.create(groupId, inviterDhKey, signingKeyPair, 1_800_000_000_000L)
+        val link = GroupInvite.create(groupId, inviterDhKey, signingKeyPair, 1_800_000_000_000L, Random.nextBytes(32))
         val fromLink = requireNotNull(GroupInvite.parse(link))
 
         val fromBytes = requireNotNull(GroupInvite.decode(fromLink.encode()))

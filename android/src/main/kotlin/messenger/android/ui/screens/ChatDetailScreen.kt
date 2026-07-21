@@ -685,6 +685,7 @@ fun ChatDetailScreen(
             peerNickname = peerNickname,
             safetyNumberFormatted = safetyNumber,
             isVerified = isVerified,
+            signingKeyPinned = peerSigningKeyHex != null,
             onDismiss = { showSafetyNumber = false },
             onMarkVerified = {
                 onMarkVerified()

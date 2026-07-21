@@ -1,5 +1,6 @@
 package messenger.common.group
 
+import messenger.common.util.hexToByteArray
 import messenger.common.util.toHex
 
 /**
@@ -40,12 +41,32 @@ class GroupControlLog(val groupId: ByteArray) {
     // and send it to any member -- recompute() then walks the attacker's fake genesis instead,
     // handing them OWNER over the group's entire membership from that point on. Pinning whichever
     // real CREATE_GROUP this log accepts as root *first* makes that permanent: a later-arriving
-    // competing genesis, however small its hash, can never dislodge it. This mirrors the same
-    // trust-on-first-use model already used for signing-key pinning elsewhere (see
-    // E2eeManager.pinnedSigningIdentityKeys) -- a genuinely stronger fix would bind the expected
-    // genesis hash into GroupInvite itself so a joining member never has to trust-on-first-use at
-    // all, left as a follow-up (TODO) since it needs a wire-format change to the invite.
+    // competing genesis, however small its hash, can never dislodge it. This still leaves a
+    // narrower race for a *joining* member specifically -- their log is created fresh (see
+    // GroupManager.onControlEvent's getOrPut) the moment ANY GROUP_CONTROL_EVENT for that groupId
+    // arrives over any pairwise session, not just from the inviter, so an attacker who merely
+    // predicts/knows the groupId (e.g. because they crafted the invite) and holds any pairwise
+    // session with the joiner could race a forged CREATE_GROUP in ahead of the real inviter's
+    // bootstrap. [expectGenesis] closes that: GroupInvite now carries the real genesis hash
+    // (signed by the inviter, who already knows it), and the joiner pins it via expectGenesis
+    // before ever ingesting an event, so a forged genesis is simply never selected regardless of
+    // arrival order -- this mirrors the same trust-on-first-use model already used for signing-key
+    // pinning elsewhere (see E2eeManager.pinnedSigningIdentityKeys), just pinned from a signed,
+    // out-of-band-delivered value instead of from whatever arrives first.
     private var pinnedGenesisHash: String? = null
+
+    /**
+     * Pins the expected genesis hash *before* any event has been ingested — see this field's own
+     * doc above. A no-op if a genesis is already pinned (either from an earlier call, or lazily by
+     * [canonicalPath] once real history exists), so calling this on a log that already has state
+     * can never retroactively change which genesis it's committed to.
+     */
+    fun expectGenesis(hash: ByteArray) {
+        if (pinnedGenesisHash == null) pinnedGenesisHash = hash.toHex()
+    }
+
+    /** The pinned genesis event's hash, or null if none is pinned yet (no event ingested, and [expectGenesis] never called) — what [messenger.common.group.GroupInvite.create] should embed so a joiner can pin it before ever ingesting an event. */
+    fun genesisHash(): ByteArray? = pinnedGenesisHash?.hexToByteArray()
 
     var state: GroupState = GroupState.empty(groupId)
         private set

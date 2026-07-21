@@ -23,37 +23,47 @@ object GroupInvite {
     private const val DH_KEY_LENGTH = 32
     private const val SIGNING_KEY_LENGTH = Ed25519Signatures.KEY_LENGTH
     private const val SIGNATURE_LENGTH = Ed25519Signatures.SIGNATURE_LENGTH
+    private const val GENESIS_HASH_LENGTH = 32
 
     class Invite(
         val groupId: ByteArray,
         val inviterDhKey: ByteArray,
         val inviterSigningPublicKey: ByteArray,
         val expiresAtMillis: Long,
+        // SECURITY: signed alongside everything else here so a joiner can pin the *real* group's
+        // genesis (see GroupControlLog.expectGenesis) before ever ingesting a single control event
+        // — without this, the joiner's log starts genesis-less and pins whichever CREATE_GROUP
+        // event happens to arrive first over any pairwise session, not necessarily from this
+        // invite's inviter, letting anyone who predicts the groupId and holds any session with the
+        // joiner race a forged genesis in ahead of the real bootstrap.
+        val genesisHash: ByteArray,
         val signature: ByteArray,
     ) {
         fun isExpired(nowMillis: Long): Boolean = nowMillis >= expiresAtMillis
         fun verifySignature(): Boolean = Ed25519Signatures.verify(inviterSigningPublicKey, signedBytes(), signature)
 
-        private fun signedBytes(): ByteArray = signedBytesFor(groupId, inviterDhKey, inviterSigningPublicKey, expiresAtMillis)
+        private fun signedBytes(): ByteArray = signedBytesFor(groupId, inviterDhKey, inviterSigningPublicKey, expiresAtMillis, genesisHash)
 
         /** Re-serializes this already-signed invite back to the raw bytes [decode] parses — for retransmitting it as a join request's proof, without re-signing anything. */
         fun encode(): ByteArray {
-            val buffer = ByteBuffer.allocate(GROUP_ID_LENGTH + DH_KEY_LENGTH + SIGNING_KEY_LENGTH + 8 + SIGNATURE_LENGTH)
+            val buffer = ByteBuffer.allocate(GROUP_ID_LENGTH + DH_KEY_LENGTH + SIGNING_KEY_LENGTH + 8 + GENESIS_HASH_LENGTH + SIGNATURE_LENGTH)
             buffer.put(groupId)
             buffer.put(inviterDhKey)
             buffer.put(inviterSigningPublicKey)
             buffer.putLong(expiresAtMillis)
+            buffer.put(genesisHash)
             buffer.put(signature)
             return buffer.array()
         }
     }
 
-    private fun signedBytesFor(groupId: ByteArray, inviterDhKey: ByteArray, inviterSigningPublicKey: ByteArray, expiresAtMillis: Long): ByteArray {
-        val buffer = ByteBuffer.allocate(GROUP_ID_LENGTH + DH_KEY_LENGTH + SIGNING_KEY_LENGTH + 8)
+    private fun signedBytesFor(groupId: ByteArray, inviterDhKey: ByteArray, inviterSigningPublicKey: ByteArray, expiresAtMillis: Long, genesisHash: ByteArray): ByteArray {
+        val buffer = ByteBuffer.allocate(GROUP_ID_LENGTH + DH_KEY_LENGTH + SIGNING_KEY_LENGTH + 8 + GENESIS_HASH_LENGTH)
         buffer.put(groupId)
         buffer.put(inviterDhKey)
         buffer.put(inviterSigningPublicKey)
         buffer.putLong(expiresAtMillis)
+        buffer.put(genesisHash)
         return buffer.array()
     }
 
@@ -63,7 +73,8 @@ object GroupInvite {
         inviterDhKey: ByteArray,
         inviterSigningKeyPair: Ed25519Signatures.SigningKeyPair,
         expiresAtMillis: Long,
-    ): String = PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(encode(groupId, inviterDhKey, inviterSigningKeyPair, expiresAtMillis))
+        genesisHash: ByteArray,
+    ): String = PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(encode(groupId, inviterDhKey, inviterSigningKeyPair, expiresAtMillis, genesisHash))
 
     /** Same as [create] but returns the raw signed bytes without the `voron-group:`/base64 text wrapping — used to transmit an invite as a join request's proof (see [messenger.common.client.MessengerClient.sendGroupJoinRequest]) instead of round-tripping through link text. */
     fun encode(
@@ -71,16 +82,18 @@ object GroupInvite {
         inviterDhKey: ByteArray,
         inviterSigningKeyPair: Ed25519Signatures.SigningKeyPair,
         expiresAtMillis: Long,
+        genesisHash: ByteArray,
     ): ByteArray {
         val signature = Ed25519Signatures.sign(
             inviterSigningKeyPair.privateKey,
-            signedBytesFor(groupId, inviterDhKey, inviterSigningKeyPair.publicKey, expiresAtMillis),
+            signedBytesFor(groupId, inviterDhKey, inviterSigningKeyPair.publicKey, expiresAtMillis, genesisHash),
         )
-        val buffer = ByteBuffer.allocate(GROUP_ID_LENGTH + DH_KEY_LENGTH + SIGNING_KEY_LENGTH + 8 + SIGNATURE_LENGTH)
+        val buffer = ByteBuffer.allocate(GROUP_ID_LENGTH + DH_KEY_LENGTH + SIGNING_KEY_LENGTH + 8 + GENESIS_HASH_LENGTH + SIGNATURE_LENGTH)
         buffer.put(groupId)
         buffer.put(inviterDhKey)
         buffer.put(inviterSigningKeyPair.publicKey)
         buffer.putLong(expiresAtMillis)
+        buffer.put(genesisHash)
         buffer.put(signature)
         return buffer.array()
     }
@@ -95,14 +108,15 @@ object GroupInvite {
 
     /** Parses the raw signed bytes [encode] produces (no link text wrapping), or null if malformed. Same non-verification contract as [parse]. */
     fun decode(raw: ByteArray): Invite? {
-        val expectedSize = GROUP_ID_LENGTH + DH_KEY_LENGTH + SIGNING_KEY_LENGTH + 8 + SIGNATURE_LENGTH
+        val expectedSize = GROUP_ID_LENGTH + DH_KEY_LENGTH + SIGNING_KEY_LENGTH + 8 + GENESIS_HASH_LENGTH + SIGNATURE_LENGTH
         if (raw.size != expectedSize) return null
         val buffer = ByteBuffer.wrap(raw)
         val groupId = ByteArray(GROUP_ID_LENGTH).also { buffer.get(it) }
         val inviterDhKey = ByteArray(DH_KEY_LENGTH).also { buffer.get(it) }
         val inviterSigningPublicKey = ByteArray(SIGNING_KEY_LENGTH).also { buffer.get(it) }
         val expiresAtMillis = buffer.long
+        val genesisHash = ByteArray(GENESIS_HASH_LENGTH).also { buffer.get(it) }
         val signature = ByteArray(SIGNATURE_LENGTH).also { buffer.get(it) }
-        return Invite(groupId, inviterDhKey, inviterSigningPublicKey, expiresAtMillis, signature)
+        return Invite(groupId, inviterDhKey, inviterSigningPublicKey, expiresAtMillis, genesisHash, signature)
     }
 }

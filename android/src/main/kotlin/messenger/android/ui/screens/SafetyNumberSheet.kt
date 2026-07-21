@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -40,6 +41,14 @@ fun SafetyNumberSheet(
     peerNickname: String,
     safetyNumberFormatted: String,
     isVerified: Boolean,
+    // SECURITY: false exactly when there's no pinned signing key for this peer yet to fold into
+    // the number (see SafetyNumber.compute's signingKeyA/B) -- normally only true for a handful of
+    // seconds around a session's very first message, but if the peer's session was somehow lost
+    // and never re-established, it can stay false indefinitely. Comparing the number in that state
+    // still catches a *DH*-identity substitution, but not a same-DH-key/different-signing-key one
+    // (see X3dhSigningKeySpoofExploitTest) -- worth saying so explicitly rather than showing an
+    // unqualified "safety number" that reads as a complete guarantee it currently isn't.
+    signingKeyPinned: Boolean = true,
     onDismiss: () -> Unit,
     onMarkVerified: () -> Unit,
 ) {
@@ -89,6 +98,24 @@ fun SafetyNumberSheet(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+            if (!signingKeyPinned) {
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.WarningAmber, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "Not fully verified yet — this number won't reflect a signing-key swap until you've exchanged at least one message with $peerNickname. Check again after that.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
             }
             Spacer(Modifier.height(20.dp))
             if (isVerified) {

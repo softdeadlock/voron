@@ -54,6 +54,13 @@ class TurnCredentialsIssuer(private val appName: String, private val secretKey: 
         }
 
         return try {
+            // secretKey travels as a URL query parameter because that's Metered.ca's own documented
+            // REST contract for this endpoint, not a choice made here -- a header/body alternative
+            // isn't offered. That means it's exactly as exposed as this request URL is to whatever
+            // sits on the path to metered.live (their own access logs, any CDN/proxy in front of
+            // them) -- this relay's own HTTP client has no logging plugin installed, so it never
+            // writes the URL anywhere itself. Residual risk accepted, not something fixable from
+            // this side without Metered.ca changing their API.
             val response = httpClient.post("https://$appName.metered.live/api/v1/turn/credential") {
                 url { parameters.append("secretKey", secretKey) }
                 contentType(ContentType.Application.Json)

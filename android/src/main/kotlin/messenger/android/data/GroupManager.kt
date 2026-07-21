@@ -228,10 +228,11 @@ class GroupManager(private val appContext: Context, private val appState: AppSta
         rekeyAndDistribute(groupId, log)
     }
 
-    /** Builds a signed, expiring invite link for [groupId] — only meaningful if invite links are enabled and the caller is allowed to add (the receiving inviter re-checks both). */
+    /** Builds a signed, expiring invite link for [groupId] — only meaningful if invite links are enabled and the caller is allowed to add (the receiving inviter re-checks both). Null if we don't actually hold this group's log, or (shouldn't happen once any event exists) it somehow has no genesis pinned yet. */
     fun createInviteLink(groupId: ByteArray, validForMillis: Long = 7L * 24 * 60 * 60 * 1000): String? {
         val identity = client()?.identity ?: return null
-        return GroupInvite.create(groupId, identity.dhIdentityPublicKey, identity.signingIdentity, System.currentTimeMillis() + validForMillis)
+        val genesisHash = logs[groupId.toHex()]?.genesisHash() ?: return null
+        return GroupInvite.create(groupId, identity.dhIdentityPublicKey, identity.signingIdentity, System.currentTimeMillis() + validForMillis, genesisHash)
     }
 
     /** Opens an invite link/QR: validates it and asks the inviter to add us. Returns a human-readable error, or null on success (the actual add arrives later as a control event). */
@@ -240,6 +241,15 @@ class GroupManager(private val appContext: Context, private val appState: AppSta
         if (!invite.verifySignature()) return "This invite's signature is invalid"
         if (invite.isExpired(System.currentTimeMillis())) return "This invite link has expired"
         val client = client() ?: return "Not connected"
+        // SECURITY: pin the invite's signed genesis hash into our (possibly brand new) log for
+        // this group *before* sending the join request — so whichever control event we ingest
+        // first, from whoever it arrives from, can never seed the wrong genesis. See
+        // GroupControlLog.expectGenesis's doc for the race this closes. A no-op if we somehow
+        // already hold this group's log with real history (rejoining, or the invite is for a
+        // group we're already in).
+        mutex.withLock {
+            logs.getOrPut(invite.groupId.toHex()) { GroupControlLog(invite.groupId) }.expectGenesis(invite.genesisHash)
+        }
         return try {
             // The whole signed invite travels with the request (not just the groupId) so the
             // inviter can re-verify it themselves instead of trusting that we hold a valid one.
