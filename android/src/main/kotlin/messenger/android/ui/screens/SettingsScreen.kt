@@ -221,22 +221,25 @@ fun SettingsScreen(
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                SwitchRow(
-                    icon = Icons.Filled.Fingerprint,
-                    tint = if (appLockEnabled) voronEncryptedColor() else voronNeutralIconTint(),
-                    label = "App lock",
-                    detail = "Require your fingerprint or device PIN when Voron comes back to the foreground",
-                    checked = appLockEnabled,
-                    onCheckedChange = onAppLockChange,
-                )
+                Column {
+                    SwitchRow(
+                        icon = Icons.Filled.Fingerprint,
+                        tint = if (appLockEnabled) voronEncryptedColor() else voronNeutralIconTint(),
+                        label = "App lock",
+                        detail = "Require your fingerprint or device PIN when Voron comes back to the foreground",
+                        checked = appLockEnabled,
+                        onCheckedChange = onAppLockChange,
+                    )
+                    DividerSpace()
+                    ActionRow(
+                        icon = Icons.Filled.Fingerprint,
+                        label = "Dead man's switch",
+                        detail = if (deadManSwitchConfig.enabled) "Armed — fires after ${deadManSwitchConfig.intervalDays}d of inactivity" else "Off",
+                        destructive = deadManSwitchConfig.enabled,
+                        onClick = { showDeadManSwitch = true },
+                    )
+                }
             }
-            ActionCard(
-                icon = Icons.Filled.Fingerprint,
-                label = "Dead man's switch",
-                detail = if (deadManSwitchConfig.enabled) "Armed — fires after ${deadManSwitchConfig.intervalDays}d of inactivity" else "Off",
-                destructive = deadManSwitchConfig.enabled,
-                onClick = { showDeadManSwitch = true },
-            )
 
             Spacer(Modifier.height(28.dp))
             SectionLabel("Privacy")
@@ -515,6 +518,7 @@ private fun ActionRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     detail: String,
+    destructive: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -524,10 +528,14 @@ private fun ActionRow(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = voronNeutralIconTint())
+        Icon(icon, contentDescription = null, tint = if (destructive) MaterialTheme.colorScheme.error else voronNeutralIconTint())
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onBackground)
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground,
+            )
             Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
