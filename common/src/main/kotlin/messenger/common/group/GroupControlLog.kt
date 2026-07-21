@@ -31,8 +31,37 @@ class GroupControlLog(val groupId: ByteArray) {
     private val eventsByHash = HashMap<String, GroupControlEvent>()
     private val childrenOf = HashMap<String, MutableList<String>>()
 
+    // SECURITY: without this, canonicalPath()'s "always take the lexicographically smallest child"
+    // fork rule applies even at the very root -- ANY CREATE_GROUP event claiming prevEventHash =
+    // GENESIS_HASH competes to be genesis, forever, no matter how long ago the real genesis was
+    // already accepted and built upon. An attacker who merely knows groupId can forge their own
+    // CREATE_GROUP (self-signed, so verifySignature() trivially passes), vary its payload until its
+    // hash beats the real genesis's (SHA-256 is fast; beating one fixed target is ~50/50 per try),
+    // and send it to any member -- recompute() then walks the attacker's fake genesis instead,
+    // handing them OWNER over the group's entire membership from that point on. Pinning whichever
+    // real CREATE_GROUP this log accepts as root *first* makes that permanent: a later-arriving
+    // competing genesis, however small its hash, can never dislodge it. This mirrors the same
+    // trust-on-first-use model already used for signing-key pinning elsewhere (see
+    // E2eeManager.pinnedSigningIdentityKeys) -- a genuinely stronger fix would bind the expected
+    // genesis hash into GroupInvite itself so a joining member never has to trust-on-first-use at
+    // all, left as a follow-up (TODO) since it needs a wire-format change to the invite.
+    private var pinnedGenesisHash: String? = null
+
     var state: GroupState = GroupState.empty(groupId)
         private set
+
+    companion object {
+        // DoS: recompute() replays the *entire* canonical path on every single ingest(), and
+        // GroupManager.store.load() replays the whole thing again on every app launch -- with no
+        // ceiling, any current (or since-removed, since removal doesn't retroactively invalidate
+        // events they already got accepted into the shared history) member could keep this log
+        // growing forever, making every future ingest() and every future app launch progressively
+        // more expensive for every other member. The relay-side GroupEventRateLimiter throttles how
+        // *fast* one device can push events; this caps the total regardless of how slowly they
+        // trickle it in. 5000 is comfortably above any real group's realistic lifetime event count
+        // (member/role/setting changes), not a limit anyone using the app normally would ever hit.
+        private const val MAX_EVENTS_PER_GROUP = 5000
+    }
 
     /** The canonical tip's hash, or [GENESIS_HASH] if nothing has been ingested yet — what a new event's `prevEventHash` should point to. */
     fun headHash(): ByteArray = canonicalPath().lastOrNull()?.let { eventsByHash.getValue(it).hash() } ?: GENESIS_HASH
@@ -48,6 +77,7 @@ class GroupControlLog(val groupId: ByteArray) {
         if (!event.verifySignature()) return false
         val hash = event.hashHex()
         if (eventsByHash.containsKey(hash)) return true
+        if (eventsByHash.size >= MAX_EVENTS_PER_GROUP) return false
         eventsByHash[hash] = event
         childrenOf.getOrPut(event.prevEventHash.toHex()) { mutableListOf() }.add(hash)
         recompute()
@@ -70,7 +100,17 @@ class GroupControlLog(val groupId: ByteArray) {
 
     private fun canonicalPath(): List<String> {
         val path = ArrayList<String>()
-        var current = GENESIS_HASH.toHex()
+        if (pinnedGenesisHash == null) {
+            // Only a real CREATE_GROUP can ever become the root -- if some other event type won a
+            // race to claim prevEventHash = GENESIS_HASH first (or an attacker aims a junk event at
+            // that slot specifically to grab the pin), falling through to it here would permanently
+            // wedge this group at an empty state, before the real genesis ever gets a chance.
+            pinnedGenesisHash = childrenOf[GENESIS_HASH.toHex()]
+                ?.filter { eventsByHash[it]?.eventType == GroupEventType.CREATE_GROUP }
+                ?.minOrNull()
+        }
+        var current = pinnedGenesisHash ?: return path
+        path += current
         while (true) {
             val next = childrenOf[current]?.minOrNull() ?: break
             path += next
@@ -175,7 +215,8 @@ class GroupControlLog(val groupId: ByteArray) {
             GroupEventType.SET_GROUP_INFO -> {
                 val canChange = signer?.role == GroupRole.OWNER || signer?.hasPermission(AdminPermission.CHANGE_INFO) == true
                 if (!canChange) return state
-                state.copy(name = GroupEventPayloads.decodeGroupInfoName(event.payload))
+                val decoded = GroupEventPayloads.decodeGroupInfo(event.payload)
+                state.copy(name = decoded.name, avatarIconId = decoded.avatarIconId)
             }
 
             GroupEventType.SET_ANNOUNCEMENT_MODE -> {

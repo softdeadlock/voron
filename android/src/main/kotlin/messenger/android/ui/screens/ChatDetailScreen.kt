@@ -35,6 +35,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Deselect
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Schedule
@@ -75,6 +78,7 @@ import kotlinx.coroutines.launch
 import messenger.android.data.AvatarIconId
 import messenger.android.data.ChatMessage
 import messenger.android.data.DRAFTS_DEVICE_KEY
+import messenger.android.data.StickerId
 import messenger.android.data.VoronLog
 import messenger.android.ui.Avatar
 import messenger.android.ui.theme.voronEncryptedColor
@@ -106,6 +110,8 @@ fun ChatDetailScreen(
     onFetchLinkPreview: suspend (String) -> ApplicationMessage.LinkPreviewRef? = { null },
     onSendFile: (Uri) -> Unit = {},
     onSendVoice: (file: File, durationMillis: Long) -> Unit = { _, _ -> },
+    onSendSticker: (StickerId) -> Unit = {},
+    isFounder: Boolean = false,
     onTogglePin: (index: Int) -> Unit,
     onDeleteMessage: (index: Int) -> Unit,
     onRetryMessage: (index: Int) -> Unit,
@@ -125,6 +131,10 @@ fun ChatDetailScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var optionsSheetIndex by remember { mutableStateOf<Int?>(null) }
+    // Selection mode: entered via MessageOptionsSheet's "Select" action, exited either explicitly
+    // (the X in the top bar) or implicitly once the last selected message is deselected.
+    var selectedIndices by remember(peerKeyHex) { mutableStateOf<Set<Int>>(emptySet()) }
+    val selectionMode = selectedIndices.isNotEmpty()
     var showSafetyNumber by remember { mutableStateOf(false) }
     var openLinkPreviewMessage by remember(peerKeyHex) { mutableStateOf<ChatMessage?>(null) }
     var galleryStartPath by remember(peerKeyHex) { mutableStateOf<String?>(null) }
@@ -299,6 +309,10 @@ fun ChatDetailScreen(
         topBar = {
             TopAppBar(
                 title = {
+                    if (selectionMode) {
+                        Text("${selectedIndices.size} selected", style = MaterialTheme.typography.titleMedium)
+                        return@TopAppBar
+                    }
                     if (inChatSearchActive) {
                         InChatSearchField(
                             query = inChatSearchQuery,
@@ -356,11 +370,37 @@ fun ChatDetailScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (selectionMode) {
+                        IconButton(onClick = { selectedIndices = emptySet() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cancel selection")
+                        }
+                    } else {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 actions = {
+                    if (selectionMode) {
+                        val allSelected = selectedIndices.size == messages.size
+                        IconButton(onClick = {
+                            selectedIndices = if (allSelected) emptySet() else messages.indices.toSet()
+                        }) {
+                            Icon(
+                                if (allSelected) Icons.Filled.Deselect else Icons.Filled.SelectAll,
+                                contentDescription = if (allSelected) "Deselect all" else "Select all",
+                            )
+                        }
+                        IconButton(onClick = {
+                            // Highest index first so deleting doesn't shift the remaining indices
+                            // out from under the ones still queued to delete.
+                            for (index in selectedIndices.sortedDescending()) onDeleteMessage(index)
+                            selectedIndices = emptySet()
+                        }) {
+                            Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete selected", tint = MaterialTheme.colorScheme.error)
+                        }
+                        return@TopAppBar
+                    }
                     if (inChatSearchActive) {
                         val hasMatches = inChatMatchIndices.isNotEmpty()
                         if (inChatSearchQuery.trim().length >= 2) {
@@ -470,6 +510,8 @@ fun ChatDetailScreen(
                     onPickImage = if (isDrafts) null else pickImage,
                     onPickDocument = pickDocument,
                     onVoiceMessageRecorded = if (isDrafts) null else onSendVoice,
+                    onSendSticker = onSendSticker,
+                    isFounder = isFounder,
                     focusRequester = inputFocusRequester,
                 )
             }
@@ -553,6 +595,11 @@ fun ChatDetailScreen(
                                 },
                                 onOpenLinkPreview = { openLinkPreviewMessage = it },
                                 onImageClick = { path -> galleryStartPath = path },
+                                selectionMode = selectionMode,
+                                selected = index in selectedIndices,
+                                onToggleSelect = {
+                                    selectedIndices = if (index in selectedIndices) selectedIndices - index else selectedIndices + index
+                                },
                             )
                         }
                     }
@@ -612,6 +659,10 @@ fun ChatDetailScreen(
             },
             onReact = { emoji ->
                 messages[sheetIndex].messageId?.let { id -> onReact(id, emoji.ifEmpty { null }) }
+                optionsSheetIndex = null
+            },
+            onSelect = {
+                selectedIndices = setOf(sheetIndex)
                 optionsSheetIndex = null
             },
         )

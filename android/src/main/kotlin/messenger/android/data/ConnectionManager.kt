@@ -318,6 +318,34 @@ class ConnectionManager(
         }
     }
 
+    /** Sends [sticker] to [peerKeyHex] — same store-and-forward path as text (see [ApplicationMessage.encode]'s `stickerId` param), just with an empty text body. */
+    fun sendSticker(peerKeyHex: String, sticker: StickerId) {
+        fun outgoing(status: DeliveryStatus, messageId: String? = null) = ChatMessage(
+            fromMe = true,
+            text = "",
+            timestampMillis = System.currentTimeMillis(),
+            messageId = messageId,
+            deliveryStatus = status,
+            stickerId = sticker.wireValue,
+        )
+
+        if (peerKeyHex == DRAFTS_DEVICE_KEY) {
+            appState.appendMessage(peerKeyHex, outgoing(DeliveryStatus.DELIVERED))
+            return
+        }
+        val client = appState.client ?: return
+        scope.launch {
+            val messageId = try {
+                client.sendMessage(peerKeyHex.hexToByteArray(), ByteArray(0), stickerId = sticker.wireValue)
+            } catch (e: Exception) {
+                VoronLog.w(TAG, "sendSticker to ${peerKeyHex.take(16)} failed", e)
+                appState.appendMessage(peerKeyHex, outgoing(DeliveryStatus.FAILED))
+                return@launch
+            }
+            appState.appendMessage(peerKeyHex, outgoing(DeliveryStatus.SENT, messageId))
+        }
+    }
+
     /**
      * Resends a [DeliveryStatus.FAILED] message's text and updates that same bubble in place
      * (rather than appending a new one) once it resolves. The most common cause of a FAILED send
@@ -559,6 +587,7 @@ class ConnectionManager(
                             attachmentSize = voiceAttachment?.audioBytes?.size?.toLong(),
                             transferStatus = if (voiceAttachment != null) FileTransferStatus.COMPLETE else null,
                             transferProgress = if (voiceAttachment != null) 1f else 0f,
+                            stickerId = message.stickerId,
                         ),
                     )
                     appState.markUnreadIfClosed(senderHex)
@@ -582,7 +611,7 @@ class ConnectionManager(
                         notifier.notifyIncoming(
                             senderHex,
                             appState.nicknameFor(senderHex),
-                            text,
+                            if (message.stickerId != null) "🐦 Sticker" else text,
                             hideSender = appState.hideNotificationSender,
                             hideContent = appState.hideNotificationContent,
                         )

@@ -45,6 +45,9 @@ import messenger.android.data.ChatMessage
 import messenger.android.data.ConnectionState
 import messenger.android.data.Contact
 import messenger.android.data.DRAFTS_DEVICE_KEY
+import messenger.android.data.GroupAvatarIconId
+import messenger.android.data.StickerId
+import messenger.android.data.wireValue
 import messenger.android.ui.screens.AddContactSheet
 import messenger.android.ui.screens.AddGroupMemberSheet
 import messenger.android.ui.screens.CallScreen
@@ -79,6 +82,7 @@ class VoronActions(
     val fetchLinkPreview: suspend (String) -> ApplicationMessage.LinkPreviewRef?,
     val sendFile: (peerKeyHex: String, uri: Uri) -> Unit,
     val sendVoiceMessage: (peerKeyHex: String, file: File, durationMillis: Long) -> Unit,
+    val sendSticker: (peerKeyHex: String, sticker: StickerId) -> Unit,
     val retryMessage: (peerKeyHex: String, index: Int) -> Unit,
     val editMessage: (peerKeyHex: String, messageId: String, newText: String) -> Unit,
     val toggleReaction: (peerKeyHex: String, messageId: String, emoji: String?) -> Unit,
@@ -110,6 +114,7 @@ class VoronActions(
     val demoteGroupAdmin: (groupId: ByteArray, memberKeyHex: String) -> Unit,
     val transferGroupOwnership: (groupId: ByteArray, newOwnerKeyHex: String) -> Unit,
     val setGroupAnnouncementMode: (groupId: ByteArray, enabled: Boolean) -> Unit,
+    val setGroupAvatar: (groupId: ByteArray, avatarIconId: Int) -> Unit,
     val setGroupInviteLinksEnabled: (groupId: ByteArray, enabled: Boolean) -> Unit,
     val createGroupInviteLink: (groupId: ByteArray) -> String?,
     val leaveGroup: (groupId: ByteArray) -> Unit,
@@ -313,6 +318,9 @@ private fun VoronMainContent(
             SettingsScreen(
                 themeMode = appState.themeMode,
                 onThemeModeChange = appState::updateThemeMode,
+                themeVariant = appState.themeVariant,
+                onThemeVariantChange = appState::updateThemeVariant,
+                isFounder = appState.isFounder,
                 fontScale = appState.fontScale,
                 onFontScaleChange = appState::updateFontScale,
                 onionRoutingEnabled = appState.onionRoutingEnabled,
@@ -364,6 +372,8 @@ private fun VoronMainContent(
                 onFetchLinkPreview = actions.fetchLinkPreview,
                 onSendFile = { uri -> actions.sendFile(peerKeyHex, uri) },
                 onSendVoice = { file, durationMillis -> actions.sendVoiceMessage(peerKeyHex, file, durationMillis) },
+                onSendSticker = { sticker -> actions.sendSticker(peerKeyHex, sticker) },
+                isFounder = appState.isFounder,
                 onTogglePin = { index -> appState.togglePin(peerKeyHex, index) },
                 onDeleteMessage = { index -> appState.deleteMessage(peerKeyHex, index) },
                 onRetryMessage = { index -> actions.retryMessage(peerKeyHex, index) },
@@ -433,11 +443,17 @@ private fun VoronMainContent(
                         navController.popBackStack()
                     }
                 },
+                onOpenMember = { keyHex ->
+                    if (navController.currentBackStackEntry?.isResumed() != false) {
+                        navController.navigate("chat/$keyHex")
+                    }
+                },
                 onRemoveMember = { keyHex -> actions.removeGroupMember(groupId, keyHex) },
                 onPromoteAdmin = { keyHex, permissions -> actions.promoteGroupAdmin(groupId, keyHex, permissions) },
                 onDemoteAdmin = { keyHex -> actions.demoteGroupAdmin(groupId, keyHex) },
                 onTransferOwnership = { keyHex -> actions.transferGroupOwnership(groupId, keyHex) },
                 onSetAnnouncementMode = { enabled -> actions.setGroupAnnouncementMode(groupId, enabled) },
+                onSetGroupAvatar = { iconId -> actions.setGroupAvatar(groupId, iconId.wireValue) },
                 onSetInviteLinksEnabled = { enabled -> actions.setGroupInviteLinksEnabled(groupId, enabled) },
                 onCreateInviteLink = { actions.createGroupInviteLink(groupId) },
                 onCopyToClipboard = actions.copyToClipboard,

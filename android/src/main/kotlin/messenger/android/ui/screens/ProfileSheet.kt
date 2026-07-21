@@ -49,7 +49,7 @@ import messenger.android.ui.Avatar
 import messenger.android.ui.QR_KEY_PREFIX
 import messenger.android.ui.QrCodeCard
 import messenger.android.ui.drawAvatarGlyph
-import messenger.android.ui.theme.VoronAvatarGradient
+import messenger.android.ui.theme.voronAccentGradient
 import messenger.android.ui.theme.voronNeutralIconContainerColor
 import messenger.android.ui.theme.voronSheetContainerColor
 
@@ -190,7 +190,7 @@ private fun AvatarOption(selected: Boolean, onClick: () -> Unit, content: @Compo
     Box(
         modifier = Modifier
             .size(44.dp)
-            .background(Brush.linearGradient(VoronAvatarGradient), CircleShape)
+            .background(Brush.linearGradient(voronAccentGradient()), CircleShape)
             .then(if (selected) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,

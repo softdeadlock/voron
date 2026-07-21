@@ -128,6 +128,7 @@ class MainActivity : FragmentActivity() {
             fetchLinkPreview = connectionManager::fetchLinkPreview,
             sendFile = connectionManager::sendFile,
             sendVoiceMessage = connectionManager::sendVoiceMessage,
+            sendSticker = connectionManager::sendSticker,
             retryMessage = connectionManager::retryMessage,
             editMessage = connectionManager::editMessage,
             toggleReaction = connectionManager::toggleReaction,
@@ -159,6 +160,7 @@ class MainActivity : FragmentActivity() {
             demoteGroupAdmin = groupManager::demoteAdmin,
             transferGroupOwnership = groupManager::transferOwnership,
             setGroupAnnouncementMode = groupManager::setAnnouncementMode,
+            setGroupAvatar = groupManager::setGroupAvatar,
             setGroupInviteLinksEnabled = groupManager::setInviteLinksEnabled,
             createGroupInviteLink = groupManager::createInviteLink,
             leaveGroup = groupManager::leaveGroup,
@@ -166,7 +168,7 @@ class MainActivity : FragmentActivity() {
         )
 
         setContent {
-            VoronTheme(themeMode = appState.themeMode) {
+            VoronTheme(themeMode = appState.themeMode, themeVariant = appState.themeVariant) {
                 CompositionLocalProvider(
                     LocalDensity provides LocalDensity.current.let {
                         Density(it.density, appState.fontScale)

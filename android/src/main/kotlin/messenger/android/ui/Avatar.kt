@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,15 +27,29 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import messenger.android.data.AvatarIconId
-import messenger.android.ui.theme.VoronAvatarGradient
+import messenger.android.data.GroupAvatarIconId
+import messenger.android.ui.theme.voronAccentGradient
 
-/** A gradient-filled circle with the contact's first initial (or a chosen raven/bird glyph), matching the landing page avatars. */
+/**
+ * A gradient-filled circle with the contact's first initial (or a chosen raven/bird glyph),
+ * matching the landing page avatars. [isGroup] switches to [GroupAvatarIconId]'s separate,
+ * "gathering"-themed glyph set instead of [iconId]'s personal one — falling back to a generic
+ * group icon rather than an initial letter when a group hasn't picked one yet.
+ */
 @Composable
-fun Avatar(label: String, modifier: Modifier = Modifier, size: Dp = 44.dp, isDrafts: Boolean = false, iconId: AvatarIconId? = null) {
+fun Avatar(
+    label: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 44.dp,
+    isDrafts: Boolean = false,
+    iconId: AvatarIconId? = null,
+    isGroup: Boolean = false,
+    groupIconId: GroupAvatarIconId? = null,
+) {
     Box(
         modifier = modifier
             .size(size)
-            .background(Brush.linearGradient(VoronAvatarGradient), CircleShape),
+            .background(Brush.linearGradient(voronAccentGradient()), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         when {
@@ -43,6 +58,13 @@ fun Avatar(label: String, modifier: Modifier = Modifier, size: Dp = 44.dp, isDra
                 contentDescription = null,
                 tint = Color.White,
                 modifier = Modifier.size(size * 0.62f),
+            )
+            groupIconId != null -> Canvas(modifier = Modifier.size(size * 0.64f)) { drawGroupAvatarGlyph(groupIconId) }
+            isGroup -> Icon(
+                Icons.Filled.Groups,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(size * 0.5f),
             )
             iconId != null -> Canvas(modifier = Modifier.size(size * 0.64f)) { drawAvatarGlyph(iconId) }
             else -> Text(
@@ -180,3 +202,99 @@ private fun DrawScope.drawEyeGlyph() {
 
 /** A dark accent for the small detail inside an otherwise-solid-white glyph (pupil, eye dot, spine) — needs to read against white regardless of theme, so it isn't tied to [MaterialTheme]. Same tone the original eye glyph used, kept unchanged. */
 private val GlyphAccent = Color(0x552A2A2A)
+
+/**
+ * Hand-drawn, "gathering"-themed group avatar glyphs — a deliberately different vocabulary from
+ * [drawAvatarGlyph]'s personal set (nest/branch/lantern/knot/compass evoke a place or a bond, not
+ * an individual bird), except [GroupAvatarIconId.MURDER] which reuses the collective-noun joke
+ * ("a murder of ravens") as three birds rather than the personal set's two.
+ */
+fun DrawScope.drawGroupAvatarGlyph(iconId: GroupAvatarIconId) {
+    when (iconId) {
+        GroupAvatarIconId.NEST -> drawNestGlyph()
+        GroupAvatarIconId.MURDER -> drawMurderGlyph()
+        GroupAvatarIconId.BRANCH -> drawBranchGlyph()
+        GroupAvatarIconId.LANTERN -> drawLanternGlyph()
+        GroupAvatarIconId.KNOT -> drawKnotGlyph()
+        GroupAvatarIconId.COMPASS -> drawCompassGlyph()
+    }
+}
+
+/** A woven bowl (thick rounded stroke) around a single held egg — the group as a shared place. */
+private fun DrawScope.drawNestGlyph() {
+    val w = size.width
+    val h = size.height
+    val bowl = Path().apply {
+        moveTo(w * 0.10f, h * 0.42f)
+        quadraticTo(w * 0.5f, h * 0.30f, w * 0.90f, h * 0.42f)
+        quadraticTo(w * 0.82f, h * 0.72f, w * 0.5f, h * 0.78f)
+        quadraticTo(w * 0.18f, h * 0.72f, w * 0.10f, h * 0.42f)
+        close()
+    }
+    drawPath(bowl, color = Color.White, style = Stroke(width = w * 0.11f, cap = StrokeCap.Round))
+    drawCircle(color = GlyphAccent, radius = w * 0.08f, center = Offset(w * 0.5f, h * 0.5f))
+}
+
+/** Three small swept bird-strokes in a loose cluster — see the type doc for the "murder" pun. */
+private fun DrawScope.drawMurderGlyph() {
+    val w = size.width
+    val h = size.height
+    fun bird(cx: Float, cy: Float, spread: Float, dip: Float) = Path().apply {
+        moveTo(cx - spread, cy)
+        quadraticTo(cx - spread * 0.35f, cy - dip, cx, cy)
+        quadraticTo(cx + spread * 0.35f, cy - dip, cx + spread, cy)
+    }
+    drawPath(bird(w * 0.5f, h * 0.28f, w * 0.24f, h * 0.14f), color = Color.White, style = Stroke(width = w * 0.075f, cap = StrokeCap.Round))
+    drawPath(bird(w * 0.28f, h * 0.56f, w * 0.22f, h * 0.12f), color = Color.White, style = Stroke(width = w * 0.075f, cap = StrokeCap.Round))
+    drawPath(bird(w * 0.70f, h * 0.62f, w * 0.20f, h * 0.11f), color = Color.White, style = Stroke(width = w * 0.075f, cap = StrokeCap.Round))
+}
+
+/** A single trunk forking into two limbs — a shared perch. */
+private fun DrawScope.drawBranchGlyph() {
+    val w = size.width
+    val h = size.height
+    drawLine(color = Color.White, start = Offset(w * 0.5f, h * 0.92f), end = Offset(w * 0.5f, h * 0.46f), strokeWidth = w * 0.11f, cap = StrokeCap.Round)
+    drawLine(color = Color.White, start = Offset(w * 0.5f, h * 0.54f), end = Offset(w * 0.20f, h * 0.16f), strokeWidth = w * 0.09f, cap = StrokeCap.Round)
+    drawLine(color = Color.White, start = Offset(w * 0.5f, h * 0.46f), end = Offset(w * 0.82f, h * 0.12f), strokeWidth = w * 0.09f, cap = StrokeCap.Round)
+    drawCircle(color = GlyphAccent, radius = w * 0.05f, center = Offset(w * 0.5f, h * 0.5f))
+}
+
+/** A rounded lantern body on a short hanging line — a gathering point. */
+private fun DrawScope.drawLanternGlyph() {
+    val w = size.width
+    val h = size.height
+    drawLine(color = Color.White, start = Offset(w * 0.5f, h * 0.06f), end = Offset(w * 0.5f, h * 0.20f), strokeWidth = w * 0.05f, cap = StrokeCap.Round)
+    val body = Path().apply {
+        moveTo(w * 0.5f, h * 0.18f)
+        cubicTo(w * 0.82f, h * 0.22f, w * 0.86f, h * 0.60f, w * 0.66f, h * 0.88f)
+        lineTo(w * 0.34f, h * 0.88f)
+        cubicTo(w * 0.14f, h * 0.60f, w * 0.18f, h * 0.22f, w * 0.5f, h * 0.18f)
+        close()
+    }
+    drawPath(body, color = Color.White)
+    drawCircle(color = GlyphAccent, radius = w * 0.10f, center = Offset(w * 0.5f, h * 0.53f))
+}
+
+/** Two interlocked rings — belonging together. */
+private fun DrawScope.drawKnotGlyph() {
+    val w = size.width
+    val h = size.height
+    drawCircle(color = Color.White, radius = w * 0.27f, center = Offset(w * 0.37f, h * 0.5f), style = Stroke(width = w * 0.11f))
+    drawCircle(color = Color.White, radius = w * 0.27f, center = Offset(w * 0.63f, h * 0.5f), style = Stroke(width = w * 0.11f))
+}
+
+/** A diamond compass rose with one needle — a shared destination. */
+private fun DrawScope.drawCompassGlyph() {
+    val w = size.width
+    val h = size.height
+    val diamond = Path().apply {
+        moveTo(w * 0.5f, h * 0.08f)
+        lineTo(w * 0.92f, h * 0.5f)
+        lineTo(w * 0.5f, h * 0.92f)
+        lineTo(w * 0.08f, h * 0.5f)
+        close()
+    }
+    drawPath(diamond, color = Color.White, style = Stroke(width = w * 0.07f))
+    drawLine(color = Color.White, start = Offset(w * 0.5f, h * 0.24f), end = Offset(w * 0.5f, h * 0.76f), strokeWidth = w * 0.06f, cap = StrokeCap.Round)
+    drawCircle(color = GlyphAccent, radius = w * 0.06f, center = Offset(w * 0.5f, h * 0.5f))
+}

@@ -33,6 +33,9 @@ sealed interface CallUiState {
 
 data class UpdateInfo(val versionCode: Int, val versionName: String)
 
+/** Any install whose first-ever launch was at or below this versionCode is grandfathered in as a founder forever — see AppState's init block and ui/theme/ThemeVariant.FOUNDER. Bump only to extend the alpha window, never to narrow it (that would strip founder status from real early installs). */
+private const val FOUNDER_CUTOFF_VERSION_CODE = 15
+
 /** Holds all UI-visible state for the app: connection, contacts, per-peer message history. */
 class AppState(
     private val contactStore: ContactStore,
@@ -47,6 +50,14 @@ class AppState(
     var avatarIconId by mutableStateOf(avatarStore.load())
         private set
     var themeMode by mutableStateOf(settingsStore.loadThemeMode())
+    var themeVariant by mutableStateOf(settingsStore.loadThemeVariant())
+    // Decided exactly once, on this device's very first-ever launch, then locked in forever
+    // (settingsStore.isFounderStatusDetermined() short-circuits every launch after) -- an install
+    // that first ran a build at or below FOUNDER_CUTOFF_VERSION_CODE stays a founder even after
+    // updating past it; one that first installs after the cutoff never becomes one, no matter how
+    // far back it's downgraded later. See ui/theme/ThemeVariant.FOUNDER.
+    var isFounder: Boolean = settingsStore.loadIsFounder()
+        private set
     var fontScale by mutableStateOf(settingsStore.loadFontScale())
     var onionRoutingEnabled by mutableStateOf(settingsStore.loadOnionRoutingEnabled())
         private set
@@ -82,6 +93,10 @@ class AppState(
         if (contacts.none { it.deviceKeyHex == DRAFTS_DEVICE_KEY }) {
             contacts.add(0, Contact(nickname = "Drafts", deviceKeyHex = DRAFTS_DEVICE_KEY, nicknameConfirmed = true))
             contactStore.save(contacts)
+        }
+        if (!settingsStore.isFounderStatusDetermined()) {
+            isFounder = messenger.android.BuildConfig.VERSION_CODE <= FOUNDER_CUTOFF_VERSION_CODE
+            settingsStore.saveIsFounder(isFounder)
         }
     }
 
@@ -357,6 +372,11 @@ class AppState(
     fun updateThemeMode(mode: ThemeMode) {
         themeMode = mode
         settingsStore.saveThemeMode(mode)
+    }
+
+    fun updateThemeVariant(variant: ThemeVariant) {
+        themeVariant = variant
+        settingsStore.saveThemeVariant(variant)
     }
 
     fun updateFontScale(scale: Float) {

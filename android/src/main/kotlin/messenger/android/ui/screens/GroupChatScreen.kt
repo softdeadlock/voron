@@ -47,7 +47,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import messenger.android.data.ChatMessage
-import messenger.android.ui.theme.VoronAvatarGradient
+import messenger.android.ui.theme.voronAccentGradient
 import messenger.android.ui.theme.VoronViolet
 import messenger.common.group.GroupRole
 import messenger.common.group.GroupState
@@ -189,7 +189,8 @@ private fun GroupMessageBubble(message: ChatMessage, senderName: String?) {
                 bottomEnd = if (message.fromMe) 6.dp else 20.dp,
             )
         }
-        val outgoingBrush = remember { Brush.linearGradient(VoronAvatarGradient) }
+        val accentColors = voronAccentGradient()
+        val outgoingBrush = remember(accentColors) { Brush.linearGradient(accentColors) }
         Box(
             modifier = Modifier
                 .widthIn(max = 280.dp)

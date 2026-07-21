@@ -2,18 +2,25 @@ package messenger.android.ui.screens
 
 import android.content.Intent
 import android.provider.Settings as AndroidSettings
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.AltRoute
@@ -52,12 +59,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import messenger.android.data.ThemeMode
+import messenger.android.data.ThemeVariant
+import messenger.android.ui.theme.displayName
+import messenger.android.ui.theme.previewBackground
+import messenger.android.ui.theme.previewColors
 import messenger.android.ui.theme.voronEncryptedColor
 import messenger.android.ui.theme.voronNeutralIconContainerColor
 import messenger.android.ui.theme.voronNeutralIconTint
@@ -67,6 +79,9 @@ import messenger.android.ui.theme.voronNeutralIconTint
 fun SettingsScreen(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    themeVariant: ThemeVariant,
+    onThemeVariantChange: (ThemeVariant) -> Unit,
+    isFounder: Boolean,
     fontScale: Float,
     onFontScaleChange: (Float) -> Unit,
     onionRoutingEnabled: Boolean,
@@ -134,6 +149,29 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            Spacer(Modifier.height(20.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                val availableVariants = ThemeVariant.entries.filter { it != ThemeVariant.FOUNDER || isFounder }
+                availableVariants.forEach { variant ->
+                    ThemeVariantSwatch(
+                        variant = variant,
+                        selected = themeVariant == variant,
+                        onClick = { onThemeVariantChange(variant) },
+                    )
+                }
+            }
+            Text(
+                "Every theme but Corvid only applies in Dark",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 10.dp),
+            )
 
             Spacer(Modifier.height(28.dp))
             SectionLabel("Font size")
@@ -336,6 +374,32 @@ fun SettingsScreen(
     }
     if (showRestoreBackup) {
         RestoreBackupSheet(onDismiss = { showRestoreBackup = false })
+    }
+}
+
+@Composable
+private fun ThemeVariantSwatch(variant: ThemeVariant, selected: Boolean, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
+        val colors = variant.previewColors()
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .background(variant.previewBackground(), CircleShape)
+                .border(
+                    width = if (selected) 2.5.dp else 1.dp,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                    shape = CircleShape,
+                )
+                .padding(7.dp)
+                .background(Brush.sweepGradient(colors + colors.first()), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(variant.displayName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

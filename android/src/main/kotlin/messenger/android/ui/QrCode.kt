@@ -22,7 +22,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
-import messenger.android.ui.theme.VoronAvatarGradient
+import messenger.android.ui.theme.voronAccentGradient
 import messenger.android.ui.theme.VoronViolet
 
 /** Payload prefix identifying a Voron contact QR — the scanner accepts both `voron:<hex>` and a bare hex key. */
@@ -48,7 +48,7 @@ fun QrCodeCard(content: String, size: Dp = 220.dp, modifier: Modifier = Modifier
     Box(
         modifier = modifier
             .shadow(12.dp, RoundedCornerShape(24.dp), ambientColor = VoronViolet.copy(alpha = 0.4f), spotColor = VoronViolet.copy(alpha = 0.4f))
-            .background(Brush.linearGradient(VoronAvatarGradient), RoundedCornerShape(24.dp))
+            .background(Brush.linearGradient(voronAccentGradient()), RoundedCornerShape(24.dp))
             .padding(3.dp)
             .background(Color.White, RoundedCornerShape(21.dp))
             .padding(16.dp),

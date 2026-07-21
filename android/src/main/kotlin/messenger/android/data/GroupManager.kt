@@ -69,6 +69,11 @@ class GroupManager(private val appContext: Context, private val appState: AppSta
 
     /** Subscribes to the client's group flows — call once per client lifetime, alongside ConnectionManager's other collectors. */
     fun attach(client: MessengerClient) {
+        // MessengerClient itself only knows pairwise crypto sessions, not group membership -- this
+        // is what lets it refuse a GROUP_KEY_REQUEST from someone who's since been removed (see
+        // MessengerClient.groupMembershipChecker's doc). Re-set on every reconnect since it's a new
+        // MessengerClient instance each time, same as the flow subscriptions below.
+        client.groupMembershipChecker = { groupId, peerDhKey -> logs[groupId.toHex()]?.state?.members?.containsKey(peerDhKey.toHex()) == true }
         scope.launch { client.groupControlEvents.collect { onControlEvent(it) } }
         scope.launch { client.groupSyncRequests.collect { onSyncRequest(it) } }
         scope.launch { client.groupJoinRequests.collect { onJoinRequest(it) } }
@@ -94,6 +99,7 @@ class GroupManager(private val appContext: Context, private val appState: AppSta
     fun demoteAdmin(groupId: ByteArray, memberKeyHex: String) = scope.launch { demoteAdminSuspend(groupId, memberKeyHex) }
     fun transferOwnership(groupId: ByteArray, newOwnerKeyHex: String) = scope.launch { transferOwnershipSuspend(groupId, newOwnerKeyHex) }
     fun setGroupName(groupId: ByteArray, name: String) = scope.launch { setGroupNameSuspend(groupId, name) }
+    fun setGroupAvatar(groupId: ByteArray, avatarIconId: Int) = scope.launch { setGroupAvatarSuspend(groupId, avatarIconId) }
     fun setAnnouncementMode(groupId: ByteArray, enabled: Boolean) = scope.launch { setAnnouncementModeSuspend(groupId, enabled) }
     fun setInviteLinksEnabled(groupId: ByteArray, enabled: Boolean) = scope.launch { setInviteLinksEnabledSuspend(groupId, enabled) }
     fun leaveGroup(groupId: ByteArray) = scope.launch { leaveGroupSuspend(groupId) }
@@ -160,8 +166,17 @@ class GroupManager(private val appContext: Context, private val appState: AppSta
     private suspend fun transferOwnershipSuspend(groupId: ByteArray, newOwnerKeyHex: String) =
         settingsChange(groupId, GroupEventType.TRANSFER_OWNERSHIP, GroupEventPayloads.encodeMemberKey(hexToBytes(newOwnerKeyHex)))
 
-    private suspend fun setGroupNameSuspend(groupId: ByteArray, name: String) =
-        settingsChange(groupId, GroupEventType.SET_GROUP_INFO, GroupEventPayloads.encodeGroupInfo(name))
+    // SET_GROUP_INFO's payload carries name + avatarIconId together (see GroupEventPayloads), so
+    // changing just one has to read the other's *current* value first or it'd silently reset it.
+    private suspend fun setGroupNameSuspend(groupId: ByteArray, name: String) {
+        val currentAvatar = logs[groupId.toHex()]?.state?.avatarIconId ?: 0
+        settingsChange(groupId, GroupEventType.SET_GROUP_INFO, GroupEventPayloads.encodeGroupInfo(name, currentAvatar))
+    }
+
+    private suspend fun setGroupAvatarSuspend(groupId: ByteArray, avatarIconId: Int) {
+        val currentName = logs[groupId.toHex()]?.state?.name ?: return
+        settingsChange(groupId, GroupEventType.SET_GROUP_INFO, GroupEventPayloads.encodeGroupInfo(currentName, avatarIconId))
+    }
 
     private suspend fun setAnnouncementModeSuspend(groupId: ByteArray, enabled: Boolean) =
         settingsChange(groupId, GroupEventType.SET_ANNOUNCEMENT_MODE, GroupEventPayloads.encodeBoolean(enabled))
@@ -305,6 +320,14 @@ class GroupManager(private val appContext: Context, private val appState: AppSta
     }
 
     private fun onGroupMessage(incoming: IncomingGroupMessage) {
+        // SECURITY: MessengerClient's group-message/sender-key handling is purely mechanical pairwise
+        // crypto — it has no concept of group membership at all (that's this class's job), so a
+        // removed member (or anyone who ever established a pairwise session and learned groupId)
+        // could otherwise keep injecting messages that render exactly like a real member's. Checking
+        // against the *canonical* GroupControlLog state here, not just "did this decrypt", is what
+        // actually enforces "removed means removed" for incoming group chat content.
+        val log = logs[incoming.groupId.toHex()] ?: return
+        if (!log.state.members.containsKey(incoming.senderDhIdentityKey.toHex())) return
         // Deterministic, not random: (sender, epoch, counter) uniquely identifies this exact
         // message (see IncomingGroupMessage's doc) — a mailbox redelivery of the same frame
         // produces the identical id and is deduped by AppState.appendMessage's existing

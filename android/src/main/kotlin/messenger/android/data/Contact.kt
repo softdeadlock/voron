@@ -79,6 +79,8 @@ data class ChatMessage(
     val transferProgress: Float = 0f,
     /** True once this message's text has been replaced by an [messenger.common.e2ee.EditSignal] — shown as an "edited" label, no history of the previous text is kept. */
     val edited: Boolean = false,
+    /** Non-null exactly when this is a sticker rather than a text message — its wire value (see [StickerId.wireValue]); [text] is empty on a sticker message. Resolved back to art via [StickerId.fromWireValue] at render time so an unrecognized ID (older/newer build) degrades gracefully instead of crashing. */
+    val stickerId: Int? = null,
     /** This device's own reaction on this message (either party's own message), null if none. */
     val reactionMine: String? = null,
     /** The peer's reaction on this message, null if none. */

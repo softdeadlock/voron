@@ -44,6 +44,11 @@ private fun pad(plaintext: ByteArray): ByteArray {
 /** Reverses [pad] — the real length is always stored in the first 4 bytes regardless of which bucket (or overflow step) was used, so no separate "was this padded" flag is needed. */
 private fun unpad(padded: ByteArray): ByteArray {
     val realLength = ByteBuffer.wrap(padded, 0, LENGTH_HEADER_SIZE).int
+    // CRASH: realLength comes straight out of this hop's own decrypted layer, so it's exactly as
+    // trustworthy as whoever produced that layer -- a corrupted circuit or a length header that
+    // wasn't actually ours to trust would otherwise throw straight out of copyOfRange (negative
+    // fromIndex, or a toIndex past the array) and take the whole onion node down with it.
+    require(realLength in 0..(padded.size - LENGTH_HEADER_SIZE)) { "invalid padded length: $realLength" }
     return padded.copyOfRange(LENGTH_HEADER_SIZE, LENGTH_HEADER_SIZE + realLength)
 }
 

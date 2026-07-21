@@ -63,9 +63,10 @@ import java.util.Locale
 import messenger.android.data.ChatMessage
 import messenger.android.data.Contact
 import messenger.android.data.DRAFTS_DEVICE_KEY
+import messenger.android.data.GroupAvatarIconId
 import messenger.android.ui.Avatar
 import messenger.android.ui.VoronLogo
-import messenger.android.ui.theme.VoronAvatarGradient
+import messenger.android.ui.theme.voronAccentGradient
 import messenger.android.ui.theme.VoronViolet
 import messenger.android.ui.theme.voronEncryptedColor
 import messenger.android.ui.theme.voronPinColor
@@ -115,7 +116,7 @@ fun ChatListScreen(
                             Text(
                                 "Voron",
                                 style = MaterialTheme.typography.titleLarge.copy(
-                                    brush = Brush.linearGradient(VoronAvatarGradient),
+                                    brush = Brush.linearGradient(voronAccentGradient()),
                                     fontWeight = FontWeight.Bold,
                                 ),
                             )
@@ -158,7 +159,7 @@ fun ChatListScreen(
                     modifier = Modifier
                         .size(60.dp)
                         .shadow(10.dp, CircleShape, ambientColor = VoronViolet.copy(alpha = 0.45f), spotColor = VoronViolet.copy(alpha = 0.45f))
-                        .background(Brush.linearGradient(VoronAvatarGradient), CircleShape)
+                        .background(Brush.linearGradient(voronAccentGradient()), CircleShape)
                         .clickable(onClick = { showFabMenu = !showFabMenu }),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -351,7 +352,7 @@ private fun ContactRow(
             Text(
                 text = lastMessage?.let {
                     val prefix = if (it.fromMe && !isDrafts) "You: " else ""
-                    val body = if (it.transferStatus != null) "📎 " + (it.attachmentName ?: "File") else it.text
+                    val body = if (it.stickerId != null) "🐦 Sticker" else if (it.transferStatus != null) "📎 " + (it.attachmentName ?: "File") else it.text
                     prefix + body
                 }
                     ?: if (isDrafts) "No notes yet" else if (contact.nicknameConfirmed) "No messages yet" else "Waiting for their first message…",
@@ -419,14 +420,7 @@ private fun GroupRow(group: GroupState, lastMessage: ChatMessage?, onClick: () -
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(50.dp)
-                .background(Brush.linearGradient(VoronAvatarGradient), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.Groups, contentDescription = null, tint = Color.White)
-        }
+        Avatar(group.name, size = 50.dp, isGroup = true, groupIconId = GroupAvatarIconId.fromWireValue(group.avatarIconId))
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(group.name.ifBlank { "Group" }, style = MaterialTheme.typography.titleMedium)

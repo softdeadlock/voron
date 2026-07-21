@@ -72,6 +72,11 @@ object ApplicationMessage {
         replyTo: ReplyReference? = null,
         linkPreview: LinkPreviewRef? = null,
         voiceAttachment: VoiceAttachmentRef? = null,
+        // A sticker is, like [senderAvatarIcon], just an opaque byte selector at this layer — the
+        // actual bundled-asset pack (see `messenger.android.data.StickerId`) lives client-side, out
+        // of :common, so the wire format never depends on a specific sticker set or ships any image
+        // bytes of its own. Null means "not a sticker, `body` is the message content as usual".
+        stickerId: Int? = null,
     ): ByteArray {
         require(messageId.size == MESSAGE_ID_LENGTH) { "message id must be $MESSAGE_ID_LENGTH bytes" }
         require(senderAvatarIcon in 0..255) { "avatar icon selector must fit in a byte" }
@@ -105,7 +110,10 @@ object ApplicationMessage {
         }
         val voiceSectionSize = if (voiceAttachment != null) 1 + 4 + voiceAudioBytes!!.size + 8 else 1
 
-        val out = ByteArray(1 + nameBytes.size + 1 + MESSAGE_ID_LENGTH + replySectionSize + previewSectionSize + voiceSectionSize + body.size)
+        require(stickerId == null || stickerId in 0..255) { "sticker id must fit in a byte" }
+        val stickerSectionSize = if (stickerId != null) 2 else 1
+
+        val out = ByteArray(1 + nameBytes.size + 1 + MESSAGE_ID_LENGTH + replySectionSize + previewSectionSize + voiceSectionSize + stickerSectionSize + body.size)
         var offset = 0
         out[offset] = nameBytes.size.toByte(); offset += 1
         nameBytes.copyInto(out, offset); offset += nameBytes.size
@@ -142,6 +150,12 @@ object ApplicationMessage {
         } else {
             out[offset] = 0; offset += 1
         }
+        if (stickerId != null) {
+            out[offset] = 1; offset += 1
+            out[offset] = stickerId.toByte(); offset += 1
+        } else {
+            out[offset] = 0; offset += 1
+        }
         body.copyInto(out, offset)
         return out
     }
@@ -154,6 +168,7 @@ object ApplicationMessage {
         val replyTo: ReplyReference? = null,
         val linkPreview: LinkPreviewRef? = null,
         val voiceAttachment: VoiceAttachmentRef? = null,
+        val stickerId: Int? = null,
     )
 
     /**
@@ -260,7 +275,20 @@ object ApplicationMessage {
         } else {
             null
         }
+        // Tolerant of a message with no sticker section at all (bytes exhausted right here) rather
+        // than throwing, the same way GroupEventPayloads.decodeGroupInfo tolerates a missing
+        // trailing field — keeps a stale/pre-upgrade peer's messages decodable instead of dropped.
+        val stickerId = if (offset < bytes.size) {
+            val hasSticker = bytes[offset].toInt() and 0xFF == 1; offset += 1
+            if (hasSticker && offset < bytes.size) {
+                (bytes[offset].toInt() and 0xFF).also { offset += 1 }
+            } else {
+                null
+            }
+        } else {
+            null
+        }
         val body = bytes.copyOfRange(offset, bytes.size)
-        return Decoded(name, avatarIcon, messageId, body, replyTo, linkPreview, voiceAttachment)
+        return Decoded(name, avatarIcon, messageId, body, replyTo, linkPreview, voiceAttachment, stickerId)
     }
 }

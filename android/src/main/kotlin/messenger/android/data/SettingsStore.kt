@@ -12,6 +12,21 @@ class SettingsStore(context: Context) {
         prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
     }
 
+    fun loadThemeVariant(): ThemeVariant = ThemeVariant.fromStorageKey(prefs.getString(KEY_THEME_VARIANT, null))
+
+    fun saveThemeVariant(variant: ThemeVariant) {
+        prefs.edit().putString(KEY_THEME_VARIANT, variant.name).apply()
+    }
+
+    /** Whether [loadIsFounder] has ever been decided for this install — see AppState's founder-status check, which only ever runs this decision once, on first launch, then locks it in forever. */
+    fun isFounderStatusDetermined(): Boolean = prefs.contains(KEY_IS_FOUNDER)
+
+    fun loadIsFounder(): Boolean = prefs.getBoolean(KEY_IS_FOUNDER, false)
+
+    fun saveIsFounder(isFounder: Boolean) {
+        prefs.edit().putBoolean(KEY_IS_FOUNDER, isFounder).apply()
+    }
+
     fun loadFontScale(): Float = prefs.getFloat(KEY_FONT_SCALE, 1.0f)
 
     fun saveFontScale(scale: Float) {
@@ -63,6 +78,8 @@ class SettingsStore(context: Context) {
 
     private companion object {
         const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_THEME_VARIANT = "theme_variant"
+        const val KEY_IS_FOUNDER = "is_founder"
         const val KEY_FONT_SCALE = "font_scale"
         const val KEY_ONION_ROUTING = "onion_routing_enabled"
         const val KEY_ONION_WIFI_ONLY = "onion_wifi_only"

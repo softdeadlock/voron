@@ -6,6 +6,7 @@ import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readBytes
+import java.nio.ByteBuffer
 import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -55,6 +56,7 @@ data class IncomingMessage(
     val replyTo: ApplicationMessage.ReplyReference? = null,
     val linkPreview: ApplicationMessage.LinkPreviewRef? = null,
     val voiceAttachment: ApplicationMessage.VoiceAttachmentRef? = null,
+    val stickerId: Int? = null,
 )
 
 /** [messageId] is the hex ID returned by the [MessengerClient.sendMessage] call that produced the now-delivered message. */
@@ -126,13 +128,26 @@ class MessengerClient(
     private val httpClient: HttpClient,
     @Volatile var displayName: String = identity.dhIdentityPublicKey.toHex().take(8),
     @Volatile var avatarIcon: Int = 0,
+    // TODO(someday, big-update territory): an `achievements: Int` bitmask alongside these two,
+    // synced the same way (an extra byte in ApplicationMessage, shown to contacts like a Telegram
+    // gift shelf). Deferred deliberately, not forgotten -- discussed 2026-07-21: architecturally
+    // safe (same E2EE envelope every profile field already rides, relay still sees nothing), but
+    // it's new surface in the single most sensitive wire format in the app, for a purely cosmetic
+    // feature, at a moment when the priority is shipping a stable alpha, not growing the envelope.
+    // Revisit once there's a real user base and the core is proven stable in the wild.
     // Same shape as DeviceIdentity.loadOrCreate's byte-array variant: callers that want the signed
     // prekey/one-time prekeys to survive a restart (e.g. Android, backed by SecureStore) supply
     // these; callers that don't (the desktop test harness) get today's fully in-memory behavior.
     loadPersistedPreKeys: () -> ByteArray? = { null },
     persistPreKeys: (ByteArray) -> Unit = {},
 ) {
-    private val logger = LoggerFactory.getLogger("messenger.common.client.MessengerClient.${identity.dhIdentityPublicKey.toHex().take(8)}")
+    // SECURITY: was suffixed with identity.dhIdentityPublicKey.toHex().take(8) -- unlike a one-off
+    // log line, a logger *name* is written into every single line this instance ever logs, for the
+    // lifetime of the process. Anyone with log access (a rooted device's logcat, a crash reporter, a
+    // support bundle) gets a stable partial identity-key prefix for free, with no need to correlate
+    // individual messages -- exactly the kind of low-effort deanonymization this app's threat model
+    // is supposed to make expensive.
+    private val logger = LoggerFactory.getLogger("messenger.common.client.MessengerClient")
 
     private val preKeyStore = PreKeyStore(identity, loadPersistedPreKeys, persistPreKeys)
     private val e2ee = E2eeManager(identity, preKeyStore)
@@ -151,6 +166,14 @@ class MessengerClient(
 
     private val outgoing = Channel<ByteArray>(capacity = 64)
     private val pendingFetches = ConcurrentHashMap<String, CompletableDeferred<PreKeyBundle?>>()
+
+    // SECURITY: the most recently *accepted* session-reset-notice timestamp per peer -- see
+    // sendSessionResetNotice/handleSessionResetNotice. A signature alone proves who sent a notice,
+    // not *when*; without this, a relay that simply records one genuine notice could replay that
+    // exact packet indefinitely, forcing an unlimited, on-demand session drop against that pair
+    // every time it felt like it. Requiring each accepted timestamp to be strictly newer than the
+    // last makes even a single-shot replay of an already-delivered notice rejected outright.
+    private val lastSessionResetTimestamps = ConcurrentHashMap<String, Long>()
 
     // Only one call is ever active at a time (see CallManager), so a single in-flight slot is
     // enough -- a second concurrent fetchTurnCredentials() call just awaits the same request
@@ -201,6 +224,14 @@ class MessengerClient(
     // 1:1 ratchet's ephemeral ReceivingChain/SendingChain state; a device that loses this (app
     // restart) recovers via GROUP_KEY_REQUEST instead of a snapshot-to-disk scheme.
     private val groupSessions = ConcurrentHashMap<String, GroupCryptoSession>()
+
+    // SECURITY: this class only ever manages the *cryptographic* sender-key sessions -- it has no
+    // concept of who's actually still a member of a group (that state lives in GroupControlLog, a
+    // layer up, e.g. messenger.android.data.GroupManager). Left null, handleGroupKeyRequest below
+    // would hand this device's current group sender key to *any* peer it holds a pairwise session
+    // with, just for correctly naming a known groupId -- including a member who was already removed.
+    // The caller that actually knows membership (GroupManager) sets this once at startup.
+    @Volatile var groupMembershipChecker: ((groupId: ByteArray, peerDhKey: ByteArray) -> Boolean)? = null
 
     private val mutableGroupMessages = MutableSharedFlow<IncomingGroupMessage>(extraBufferCapacity = 64)
     val groupMessages: SharedFlow<IncomingGroupMessage> = mutableGroupMessages
@@ -282,10 +313,23 @@ class MessengerClient(
         try {
             for (frame in session.incoming) {
                 if (frame !is Frame.Binary) continue
+                // CRASH/DoS: decodeIncoming (the onion circuit's unwrap+unpad, when onion routing
+                // is on) used to sit *outside* this catch, guarded only for transportSession's own
+                // BadPaddingException. A relay is explicitly untrusted in this app's threat model
+                // (see OnionCircuit's doc), so one frame with a corrupted padding length header
+                // (OnionCircuit.unpad) threw straight past this block, out of readerLoop's own
+                // try/catch entirely, and killed the whole reader coroutine -- silently dropping
+                // every future incoming frame on this connection until a manual reconnect. One bad
+                // frame from a hostile relay must cost this connection nothing more than that frame.
                 val plaintext = try {
                     transportSession.decrypt(decodeIncoming(frame.readBytes()))
                 } catch (e: BadPaddingException) {
                     logger.warn("dropping transport frame that failed to authenticate")
+                    continue
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.warn("dropping malformed transport frame: ${e.message}")
                     continue
                 }
                 val decoded = TransportFrame.decode(plaintext)
@@ -388,6 +432,7 @@ class MessengerClient(
                 application.replyTo,
                 application.linkPreview,
                 application.voiceAttachment,
+                application.stickerId,
             ),
         )
         sendDeliveryAck(envelope.peerStaticPublicKey, application.messageId)
@@ -446,29 +491,44 @@ class MessengerClient(
         mutableTypingIndicators.tryEmit(envelope.peerStaticPublicKey)
     }
 
-    // SECURITY (2026-07-21): this used to carry an empty payload — just [peer key] with nothing
-    // proving who sent it. Unlike ROUTE/DELIVERY_ACK/etc., it can't be wrapped in e2ee.encrypt()
-    // (the whole reason we're sending it is that we hold *no* session with the recipient to
-    // encrypt under), so a malicious relay could forge this frame directly into any device's
-    // outgoing queue/mailbox with an arbitrary claimed sender, and handleSessionResetNotice would
-    // unconditionally drop that device's real session with the named peer — an at-will forced
-    // re-handshake DoS against any pair, no cryptographic capability needed. Signing with our own
-    // identity signing key instead — verified by the recipient against their already-pinned copy
-    // of it (same TOFU pin X3DH/GroupControlLog already rely on) — means forging this now requires
-    // that private key, which a relay never holds.
+    // SECURITY (2026-07-21, revised same day after external review): this used to carry an empty
+    // payload -- just [peer key] with nothing proving who sent it, letting a malicious relay forge
+    // it directly into any device's queue with an arbitrary claimed sender. Signing closed that,
+    // but the first signed version bound the signature to nothing except the recipient's own key --
+    // no nonce, no timestamp -- so a relay that simply recorded one genuine notice could replay
+    // that exact packet indefinitely for unlimited forced re-handshakes (found in external review
+    // of the published crypto library, credited there). Now the signed message includes a
+    // timestamp, and handleSessionResetNotice below requires each accepted one to be strictly newer
+    // than the last accepted from that same peer -- a captured packet can never pass verification
+    // twice, not even once more.
     private suspend fun sendSessionResetNotice(peerDhIdentityKey: ByteArray) {
-        val signature = Ed25519Signatures.sign(identity.signingIdentity.privateKey, peerDhIdentityKey)
-        val envelope = RoutingEnvelope.encode(peerDhIdentityKey, signature)
+        val timestampBytes = ByteBuffer.allocate(8).putLong(System.currentTimeMillis()).array()
+        val signature = Ed25519Signatures.sign(identity.signingIdentity.privateKey, peerDhIdentityKey + timestampBytes)
+        val envelope = RoutingEnvelope.encode(peerDhIdentityKey, timestampBytes + signature)
         outgoing.send(TransportFrame.encode(TransportFrame.SESSION_RESET_NOTICE, envelope))
     }
 
     private suspend fun handleSessionResetNotice(body: ByteArray) {
         val envelope = decodeEnvelopeOrNull(body, "session-reset notice") ?: return
+        if (envelope.payload.size != 8 + Ed25519Signatures.SIGNATURE_LENGTH) {
+            logger.warn("dropping malformed session-reset notice from ${envelope.peerStaticPublicKey.toHex()}")
+            return
+        }
+        val timestampBytes = envelope.payload.copyOfRange(0, 8)
+        val signature = envelope.payload.copyOfRange(8, envelope.payload.size)
         val signingKey = e2ee.pinnedSigningIdentityKey(envelope.peerStaticPublicKey)
-        if (signingKey == null || !Ed25519Signatures.verify(signingKey, identity.dhIdentityPublicKey, envelope.payload)) {
+        if (signingKey == null || !Ed25519Signatures.verify(signingKey, identity.dhIdentityPublicKey + timestampBytes, signature)) {
             logger.warn("dropping session-reset notice from ${envelope.peerStaticPublicKey.toHex()}: missing/invalid signature")
             return
         }
+        val timestamp = ByteBuffer.wrap(timestampBytes).long
+        val peerHex = envelope.peerStaticPublicKey.toHex()
+        val lastAccepted = lastSessionResetTimestamps[peerHex]
+        if (lastAccepted != null && timestamp <= lastAccepted) {
+            logger.warn("dropping replayed/stale session-reset notice from ${envelope.peerStaticPublicKey.toHex()}")
+            return
+        }
+        lastSessionResetTimestamps[peerHex] = timestamp
         logger.info("peer ${envelope.peerStaticPublicKey.toHex()} lost its session with us; dropping ours too")
         e2ee.dropSession(envelope.peerStaticPublicKey)
         mutableSessionResetNotices.emit(envelope.peerStaticPublicKey)
@@ -551,12 +611,13 @@ class MessengerClient(
         replyTo: ApplicationMessage.ReplyReference? = null,
         linkPreview: ApplicationMessage.LinkPreviewRef? = null,
         voiceAttachment: ApplicationMessage.VoiceAttachmentRef? = null,
+        stickerId: Int? = null,
     ): String {
         val messageId = ByteArray(ApplicationMessage.MESSAGE_ID_LENGTH).also { random.nextBytes(it) }
         encryptAndSend(
             peerDhIdentityKey,
             TransportFrame.ROUTE,
-            ApplicationMessage.encode(displayName, avatarIcon, messageId, plaintext, replyTo, linkPreview, voiceAttachment),
+            ApplicationMessage.encode(displayName, avatarIcon, messageId, plaintext, replyTo, linkPreview, voiceAttachment, stickerId),
         )
         return messageId.toHex()
     }
@@ -649,9 +710,10 @@ class MessengerClient(
     private suspend fun sendGroupKeyRequest(peerDhIdentityKey: ByteArray, groupId: ByteArray) =
         encryptAndSend(peerDhIdentityKey, TransportFrame.GROUP_KEY_REQUEST, groupId)
 
-    /** Resends this device's current group sender key to whoever asked, if we actually have a session (and thus a key) for the group they named — a stale/forged request naming an unknown group is silently ignored. */
+    /** Resends this device's current group sender key to whoever asked, if we actually have a session (and thus a key) for the group they named *and* [groupMembershipChecker] confirms they're still a member — a stale/forged request naming an unknown group, or one from someone no longer in it, is silently ignored. */
     private suspend fun handleGroupKeyRequest(body: ByteArray) {
         val (envelope, groupId) = decryptEnvelope(body, "group key request") { it } ?: return
+        if (groupMembershipChecker?.invoke(groupId, envelope.peerStaticPublicKey) == false) return
         val currentKey = groupSessions[groupId.toHex()]?.currentSenderKeyMessageOrNull() ?: return
         runCatching { sendGroupSenderKey(envelope.peerStaticPublicKey, currentKey) }
     }

@@ -11,6 +11,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -18,11 +19,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -70,6 +75,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -84,7 +90,8 @@ import kotlinx.coroutines.withContext
 import messenger.android.data.ChatMessage
 import messenger.android.data.DeliveryStatus
 import messenger.android.data.FileTransferStatus
-import messenger.android.ui.theme.VoronAvatarGradient
+import messenger.android.data.StickerId
+import messenger.android.ui.theme.voronAccentGradient
 import messenger.android.ui.theme.VoronViolet
 import messenger.android.ui.theme.voronDeliveredColor
 import messenger.android.ui.theme.voronEncryptedColor
@@ -107,11 +114,31 @@ internal fun MessageBubble(
     onQuoteClick: (String) -> Unit,
     onOpenLinkPreview: (ChatMessage) -> Unit = {},
     onImageClick: (String) -> Unit = {},
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onToggleSelect: () -> Unit = {},
 ) {
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
     val canRetry = message.fromMe && message.deliveryStatus == DeliveryStatus.FAILED
     val canOpenAttachment = message.transferStatus == FileTransferStatus.COMPLETE && message.attachmentPath != null
+    // A sticker renders as bare art, no bubble chrome (background/padding) around it, same as
+    // Telegram/WhatsApp — [sticker] null despite [ChatMessage.stickerId] being set means an
+    // unrecognized ID (peer's build has a sticker pack this build doesn't), shown as a placeholder
+    // rather than silently dropped.
+    val isSticker = message.stickerId != null
+    val sticker = remember(message.stickerId) { message.stickerId?.let { StickerId.fromWireValue(it) } }
+
+    // The "bubble" press effect: a quick, springy shrink-and-recover on tap/hold, independent of
+    // whatever the tap/long-press actually does — a bit of tactile life on every interaction,
+    // not just the ones that trigger something.
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "bubblePressScale",
+    )
 
     val density = LocalDensity.current
     val maxDragPx = remember(density) { with(density) { SWIPE_REPLY_MAX_DRAG.toPx() } }
@@ -180,10 +207,12 @@ internal fun MessageBubble(
                     bottomEnd = if (message.fromMe) 8.dp else 22.dp,
                 )
             }
-            val outgoingBrush = remember { Brush.linearGradient(VoronAvatarGradient) }
+            val accentColors = voronAccentGradient()
+            val outgoingBrush = remember(accentColors) { Brush.linearGradient(accentColors) }
             Box(
                 modifier = Modifier
                     .widthIn(max = 280.dp)
+                    .scale(pressScale)
                     // A soft violet-tinted shadow under sent bubbles and a faint neutral one under
                     // received bubbles gives the stack real depth instead of flat cutout shapes.
                     .shadow(
@@ -193,8 +222,15 @@ internal fun MessageBubble(
                         spotColor = if (message.fromMe) VoronViolet.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.12f),
                     )
                     .combinedClickable(
+                        interactionSource = interactionSource,
+                        indication = null,
                         onClick = {
                             when {
+                                // Selection mode overrides every other tap action -- while active,
+                                // tapping any bubble (not just long-pressing) just toggles it,
+                                // matching the "tap more to select more" pattern from Telegram/
+                                // WhatsApp rather than requiring a long-press per message.
+                                selectionMode -> onToggleSelect()
                                 canRetry -> onRetry()
                                 canOpenAttachment -> openAttachment(context, message.attachmentPath!!, message.attachmentMime)
                                 message.replyToMessageId != null -> onQuoteClick(message.replyToMessageId)
@@ -202,45 +238,85 @@ internal fun MessageBubble(
                         },
                         onLongClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onLongClick()
+                            if (selectionMode) onToggleSelect() else onLongClick()
                         },
                     )
                     .then(
                         // Sent bubbles carry the app's signature violet→lavender gradient (same
                         // one used on avatars/QR/FAB) instead of a flat fill, matching the
-                        // reference mockup's glossier bubble look.
-                        if (message.fromMe) {
-                            Modifier.background(outgoingBrush, bubbleShape)
-                        } else {
-                            Modifier.background(MaterialTheme.colorScheme.surfaceVariant, bubbleShape)
+                        // reference mockup's glossier bubble look. A sticker skips the fill
+                        // entirely -- it's already got its own art, a colored backdrop behind a
+                        // die-cut transparent PNG would just look like a mistake.
+                        when {
+                            isSticker -> Modifier
+                            message.fromMe -> Modifier.background(outgoingBrush, bubbleShape)
+                            else -> Modifier.background(MaterialTheme.colorScheme.surfaceVariant, bubbleShape)
                         },
                     )
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .then(
+                        if (selected) {
+                            Modifier.border(2.5.dp, MaterialTheme.colorScheme.primary, bubbleShape)
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .padding(if (isSticker) 2.dp else 0.dp)
+                    .then(if (isSticker) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 10.dp)),
             ) {
-                Column {
-                    if (message.replyToMessageId != null) {
-                        QuoteBlock(
-                            label = if (message.replyToFromMe) "You" else peerNickname,
-                            preview = message.replyToPreview.orEmpty(),
-                            onLight = message.fromMe,
+                if (isSticker) {
+                    if (sticker != null) {
+                        Image(
+                            painter = painterResource(sticker.drawableRes),
+                            contentDescription = "Sticker",
+                            modifier = Modifier.size(132.dp),
                         )
-                        Spacer(Modifier.height(4.dp))
+                    } else {
+                        // Peer's build knows a sticker pack this one doesn't (older/newer) --
+                        // degrade to a plain glyph instead of crashing or showing nothing.
+                        Box(modifier = Modifier.size(132.dp), contentAlignment = Alignment.Center) {
+                            Text("🐦", style = MaterialTheme.typography.displayMedium)
+                        }
                     }
-                    if (message.transferStatus != null) {
-                        AttachmentContent(message, onImageClick = onImageClick)
-                        if (message.text.isNotBlank()) Spacer(Modifier.height(4.dp))
+                } else {
+                    Column {
+                        if (message.replyToMessageId != null) {
+                            QuoteBlock(
+                                label = if (message.replyToFromMe) "You" else peerNickname,
+                                preview = message.replyToPreview.orEmpty(),
+                                onLight = message.fromMe,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        if (message.transferStatus != null) {
+                            AttachmentContent(message, onImageClick = onImageClick)
+                            if (message.text.isNotBlank()) Spacer(Modifier.height(4.dp))
+                        }
+                        if (message.text.isNotBlank()) {
+                            Text(
+                                text = message.text,
+                                color = if (message.fromMe) Color.White else MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                        if (message.linkPreviewUrl != null) {
+                            if (message.text.isNotBlank()) Spacer(Modifier.height(6.dp))
+                            LinkPreviewCard(message, onLight = message.fromMe, onClick = { onOpenLinkPreview(message) })
+                        }
                     }
-                    if (message.text.isNotBlank()) {
-                        Text(
-                            text = message.text,
-                            color = if (message.fromMe) Color.White else MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                    }
-                    if (message.linkPreviewUrl != null) {
-                        if (message.text.isNotBlank()) Spacer(Modifier.height(6.dp))
-                        LinkPreviewCard(message, onLight = message.fromMe, onClick = { onOpenLinkPreview(message) })
-                    }
+                }
+                // Selection needs to be unmistakable at a glance across every theme/bubble color --
+                // a thin border alone (still kept above, for keyboard/accessibility affordance)
+                // reads as barely-there against a busy chat. A real darkening scrim over the whole
+                // bubble is the same "this is picked" language photo pickers use, and works
+                // identically regardless of which ThemeVariant or gradient the bubble itself has.
+                // A sibling of Column (both direct children of this Box), not nested inside it --
+                // matchParentSize() needs a direct Box child to measure against.
+                if (selected) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(Color.Black.copy(alpha = 0.45f), bubbleShape),
+                    )
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {

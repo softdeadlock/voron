@@ -1,25 +1,33 @@
 package messenger.android.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.QrCode
@@ -43,9 +51,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import messenger.android.data.GroupAvatarIconId
+import messenger.android.ui.Avatar
+import messenger.android.ui.theme.voronNeutralIconContainerColor
 import messenger.common.group.AdminPermission
 import messenger.common.group.GroupRole
 import messenger.common.group.GroupState
@@ -64,12 +76,14 @@ fun GroupInfoScreen(
     ownKeyHex: String,
     nicknameFor: (String) -> String,
     onBack: () -> Unit,
+    onOpenMember: (String) -> Unit,
     onRemoveMember: (String) -> Unit,
     onPromoteAdmin: (String, Int) -> Unit,
     onDemoteAdmin: (String) -> Unit,
     onTransferOwnership: (String) -> Unit,
     onSetAnnouncementMode: (Boolean) -> Unit,
     onSetInviteLinksEnabled: (Boolean) -> Unit,
+    onSetGroupAvatar: (GroupAvatarIconId?) -> Unit,
     onCreateInviteLink: () -> String?,
     onCopyToClipboard: (String) -> Unit,
     onLeaveGroup: () -> Unit,
@@ -78,11 +92,13 @@ fun GroupInfoScreen(
     var confirmLeave by remember { mutableStateOf(false) }
     var memberOptionsFor by remember { mutableStateOf<String?>(null) }
     var inviteLinkToShow by remember { mutableStateOf<String?>(null) }
+    var showAvatarPicker by remember { mutableStateOf(false) }
 
     val self = group?.members?.get(ownKeyHex)
     val isOwner = self?.role == GroupRole.OWNER
     val canRemove = isOwner || self?.hasPermission(AdminPermission.REMOVE_MEMBERS) == true
     val canAdd = isOwner || self?.hasPermission(AdminPermission.ADD_MEMBERS) == true || group?.inviteLinksEnabled == true
+    val canChangeInfo = isOwner || self?.hasPermission(AdminPermission.CHANGE_INFO) == true
     // Owner leaving/last-admin leaving needs a hand-off first — see the plan's orphaned-group rule.
     val isLastAdminOrOwner = self != null && (self.role == GroupRole.OWNER || self.role == GroupRole.ADMIN) &&
         group?.members?.values?.count { it.role == GroupRole.OWNER || it.role == GroupRole.ADMIN } == 1
@@ -101,6 +117,21 @@ fun GroupInfoScreen(
         LazyColumn(modifier = Modifier.padding(padding).fillMaxWidth().padding(horizontal = 16.dp)) {
             item {
                 Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(modifier = Modifier.clickable(enabled = canChangeInfo) { showAvatarPicker = true }) {
+                        Avatar(
+                            group.name,
+                            size = 88.dp,
+                            isGroup = true,
+                            groupIconId = GroupAvatarIconId.fromWireValue(group.avatarIconId),
+                        )
+                    }
+                }
                 if (isOwner) {
                     SettingsRow(
                         icon = Icons.Filled.Campaign,
@@ -144,10 +175,11 @@ fun GroupInfoScreen(
             }
             items(group.members.values.toList(), key = { it.dhKey.toList() }) { member ->
                 val keyHex = member.dhKey.let { it.joinToString("") { b -> "%02x".format(b) } }
+                val canManageThisMember = keyHex != ownKeyHex && (canRemove || isOwner)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = keyHex != ownKeyHex && (canRemove || isOwner)) { memberOptionsFor = keyHex }
+                        .clickable(enabled = keyHex != ownKeyHex) { onOpenMember(keyHex) }
                         .padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -162,6 +194,11 @@ fun GroupInfoScreen(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
+                    }
+                    if (canManageThisMember) {
+                        IconButton(onClick = { memberOptionsFor = keyHex }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Member options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
                 if (memberOptionsFor == keyHex) {
@@ -232,6 +269,50 @@ fun GroupInfoScreen(
             confirmButton = { TextButton(onClick = { onCopyToClipboard(link); inviteLinkToShow = null } ) { Text("Copy link") } },
             dismissButton = { TextButton(onClick = { inviteLinkToShow = null }) { Text("Close") } },
         )
+    }
+
+    if (showAvatarPicker) {
+        val currentIcon = GroupAvatarIconId.fromWireValue(group?.avatarIconId ?: 0)
+        AlertDialog(
+            onDismissRequest = { showAvatarPicker = false },
+            title = { Text("Group icon") },
+            text = {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    item {
+                        GroupAvatarOption(
+                            iconId = null,
+                            selected = currentIcon == null,
+                            onClick = { onSetGroupAvatar(null); showAvatarPicker = false },
+                        )
+                    }
+                    items(GroupAvatarIconId.entries.toList()) { option ->
+                        GroupAvatarOption(
+                            iconId = option,
+                            selected = currentIcon == option,
+                            onClick = { onSetGroupAvatar(option); showAvatarPicker = false },
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showAvatarPicker = false }) { Text("Close") } },
+        )
+    }
+}
+
+@Composable
+private fun GroupAvatarOption(iconId: GroupAvatarIconId?, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .border(
+                width = if (selected) 2.5.dp else 0.dp,
+                color = MaterialTheme.colorScheme.primary,
+                shape = CircleShape,
+            )
+            .padding(3.dp),
+    ) {
+        Avatar(label = "", size = 52.dp, isGroup = true, groupIconId = iconId)
     }
 }
 

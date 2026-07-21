@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.InsertEmoticon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -66,8 +67,9 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import messenger.android.data.ChatMessage
+import messenger.android.data.StickerId
 import messenger.android.data.VoiceRecorder
-import messenger.android.ui.theme.VoronAvatarGradient
+import messenger.android.ui.theme.voronAccentGradient
 import messenger.android.ui.theme.VoronViolet
 import messenger.android.ui.theme.voronSheetContainerColor
 import messenger.common.client.ApplicationMessage
@@ -75,8 +77,8 @@ import messenger.common.client.ApplicationMessage
 /** The quoted-message strip pinned above the input bar while the user is composing a reply. */
 @Composable
 internal fun ReplyPreviewBar(message: ChatMessage, peerNickname: String, onCancel: () -> Unit) {
-    // Replying to a file-only message would otherwise show an empty preview line.
-    val preview = message.text.ifBlank { "📎 " + (message.attachmentName ?: "File") }
+    // Replying to a file-only or sticker message would otherwise show an empty preview line.
+    val preview = if (message.stickerId != null) "🐦 Sticker" else message.text.ifBlank { "📎 " + (message.attachmentName ?: "File") }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -268,7 +270,7 @@ private fun AttachOptionRow(
             modifier = Modifier
                 .size(48.dp)
                 .shadow(4.dp, CircleShape, ambientColor = VoronViolet.copy(alpha = 0.3f), spotColor = VoronViolet.copy(alpha = 0.3f))
-                .background(Brush.linearGradient(VoronAvatarGradient), CircleShape),
+                .background(Brush.linearGradient(voronAccentGradient()), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = Color.White)
@@ -293,9 +295,12 @@ internal fun MessageInputBar(
     onPickImage: (() -> Unit)? = null,
     onPickDocument: () -> Unit = {},
     onVoiceMessageRecorded: ((File, Long) -> Unit)? = null,
+    onSendSticker: ((StickerId) -> Unit)? = null,
+    isFounder: Boolean = false,
     focusRequester: FocusRequester = remember { FocusRequester() },
 ) {
     var showAttachSheet by remember { mutableStateOf(false) }
+    var showStickerSheet by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val recorder = remember { VoiceRecorder(context) }
     var isRecording by remember { mutableStateOf(false) }
@@ -316,6 +321,15 @@ internal fun MessageInputBar(
                 Icon(
                     Icons.Filled.AttachFile,
                     contentDescription = "Attach",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (onSendSticker != null && !isRecording) {
+            IconButton(onClick = { showStickerSheet = true }) {
+                Icon(
+                    Icons.Filled.InsertEmoticon,
+                    contentDescription = "Stickers",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -382,6 +396,14 @@ internal fun MessageInputBar(
             onDismiss = { showAttachSheet = false },
             onPickImage = onPickImage,
             onPickDocument = onPickDocument,
+        )
+    }
+
+    if (showStickerSheet && onSendSticker != null) {
+        StickerPickerSheet(
+            isFounder = isFounder,
+            onDismiss = { showStickerSheet = false },
+            onPick = onSendSticker,
         )
     }
 }
