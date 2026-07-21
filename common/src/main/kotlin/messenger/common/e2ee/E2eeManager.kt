@@ -84,12 +84,14 @@ class E2eeManager(
             peerDhIdentityKey,
             bundle,
             expectedPeerSigningIdentityKey = pinnedSigningIdentityKeys[peerHex],
+            initiatorSigningIdentityKey = identity.signingIdentityPublicKey,
         )
         pinnedSigningIdentityKeys.putIfAbsent(peerHex, init.usedSigningIdentityKey)
         val session = E2eeSession.forInitiator(init.rootKey, bundle.signedPreKey, init.associatedData)
         sessions[peerHex] = session
         return E2eeMessage.Initial(
             initiatorDhIdentityKey = identity.dhIdentityPublicKey,
+            initiatorSigningIdentityKey = identity.signingIdentityPublicKey,
             initiatorEphemeralKey = init.ephemeralPublicKey,
             signedPreKeyId = init.usedSignedPreKeyId,
             oneTimePreKeyId = init.usedOneTimePreKeyId,
@@ -191,23 +193,45 @@ class E2eeManager(
     }
 
     private fun responderSessionFor(message: E2eeMessage.Initial): E2eeSession {
+        val peerHex = message.initiatorDhIdentityKey.toHex()
+        // Same TOFU pin as the initiator side's expectedPeerSigningIdentityKey check (X3dhLite),
+        // just mirrored: whoever opens a session with *us* first also gets their signing key
+        // pinned, so a relay can't later swap in its own on a fresh Initial for a peer we already
+        // know, even though nothing here required a signature over this field (it only becomes
+        // load-bearing via the AD, not an independent check) -- pinning it explicitly means a
+        // mismatch is caught before ever deriving a session at all, not just silently producing an
+        // AD/root key the peer's own side won't agree on.
+        val pinned = pinnedSigningIdentityKeys[peerHex]
+        if (pinned != null && !pinned.contentEquals(message.initiatorSigningIdentityKey)) {
+            throw UnexpectedSigningIdentity(pinned.toHex(), message.initiatorSigningIdentityKey.toHex())
+        }
         val signedPreKey = preKeyStore.signedPreKeyFor(message.signedPreKeyId)
             ?: throw IllegalStateException("unknown signed prekey id ${message.signedPreKeyId}")
         // Peeked, not consumed — see consumeOneTimePreKey call at this function's call site.
         val oneTimePreKey = preKeyStore.peekOneTimePreKey(message.oneTimePreKeyId)
         val result = X3dhLite.respond(
             responderDhIdentity = identity.dhIdentity,
+            responderSigningIdentityKey = identity.signingIdentityPublicKey,
             signedPreKey = signedPreKey,
             oneTimePreKey = oneTimePreKey,
             initiatorDhIdentityKey = message.initiatorDhIdentityKey,
+            initiatorSigningIdentityKey = message.initiatorSigningIdentityKey,
             initiatorEphemeralKey = message.initiatorEphemeralKey,
         )
+        pinnedSigningIdentityKeys.putIfAbsent(peerHex, message.initiatorSigningIdentityKey)
         return E2eeSession.forResponder(result.rootKey, signedPreKey, result.associatedData)
     }
 
     private companion object {
-        // Enough headroom for any realistic number of genuine re-handshakes with one peer over a
-        // process lifetime, while still capping what a hostile relay spamming Initials can allocate.
-        const val MAX_ACCEPTED_EPHEMERALS_PER_PEER = 64
+        // SECURITY: an entry only ever gets added *after* its Initial's AEAD tag has actually
+        // verified (see rememberAcceptedEphemeral's call site) -- a relay can't manufacture new
+        // entries by spamming forged Initials with fresh ephemerals, since it holds none of the
+        // private key material needed to make one of those actually decrypt. The only way to evict
+        // a specific old entry is to have accumulated that many *genuine* successful re-handshakes
+        // with the same peer first (reinstalls, device resets, session-reset flows) -- implausible
+        // at 64, but raised well past that anyway since the actual cost (a handful of hex strings
+        // per peer) is negligible, closing the eviction-then-replay-old-Initial rollback path even
+        // over a very long-lived, heavily-reset relationship.
+        const val MAX_ACCEPTED_EPHEMERALS_PER_PEER = 4096
     }
 }

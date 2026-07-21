@@ -12,6 +12,7 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readBytes
 import java.util.Base64
+import java.util.concurrent.Semaphore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.coroutineScope
@@ -38,6 +39,16 @@ fun Application.configureRouting(
     turnCredentialsIssuer: TurnCredentialsIssuer? = null,
 ) {
     val groupEventRateLimiter = GroupEventRateLimiter()
+    val preKeyFetchRateLimiter = GroupEventRateLimiter(maxEvents = 30, windowMillis = 10_000L)
+    // DoS: a Noise_IK handshake attempt is cheap for whoever's sending it (just a fresh ephemeral
+    // keypair) but not free for this relay to process, and nothing capped how many could be in
+    // flight or held open at once before this -- an attacker opening many sockets and either
+    // completing real handshakes or just sitting on them exhausts file descriptors/memory/coroutines
+    // with no authentication required at all. A single global permit count is coarse (no per-IP
+    // fairness) but cheap and closes the unbounded-growth failure mode; per-IP accounting is a
+    // reasonable follow-up once there's visibility into real deployment traffic patterns/proxy setup.
+    val maxConcurrentConnections = System.getenv("VORON_MAX_CONNECTIONS")?.toIntOrNull() ?: 20_000
+    val connectionSlots = Semaphore(maxConcurrentConnections)
 
     routing {
         get("/health") {
@@ -53,6 +64,12 @@ fun Application.configureRouting(
         }
 
         webSocket("/v1/connect") {
+            if (!connectionSlots.tryAcquire()) {
+                logger.info("rejecting connection: at capacity ($maxConcurrentConnections)")
+                close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "relay at capacity"))
+                return@webSocket
+            }
+            try {
             val firstFrame = incoming.receive()
             if (firstFrame !is Frame.Binary) {
                 close(CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "expected binary handshake message"))
@@ -152,7 +169,7 @@ fun Application.configureRouting(
                                 logger.info("dropping frame that failed to authenticate from ${connection.staticPublicKeyHex}")
                                 continue
                             }
-                            handleFrame(connection, plaintext, registry, preKeys, mailbox, pushRegistry, pushNotifier, turnCredentialsIssuer, groupEventRateLimiter)
+                            handleFrame(connection, plaintext, registry, preKeys, mailbox, pushRegistry, pushNotifier, turnCredentialsIssuer, groupEventRateLimiter, preKeyFetchRateLimiter)
                         }
                     } finally {
                         writer.cancel()
@@ -167,6 +184,9 @@ fun Application.configureRouting(
                 registry.unregister(connection)
                 connection.close()
                 logger.info("device disconnected: ${connection.staticPublicKeyHex}")
+            }
+            } finally {
+                connectionSlots.release()
             }
         }
     }
@@ -206,6 +226,7 @@ private suspend fun handleFrame(
     pushNotifier: PushNotifier,
     turnCredentialsIssuer: TurnCredentialsIssuer?,
     groupEventRateLimiter: GroupEventRateLimiter,
+    preKeyFetchRateLimiter: GroupEventRateLimiter,
 ) {
     val decoded = try {
         TransportFrame.decode(plaintext)
@@ -242,7 +263,18 @@ private suspend fun handleFrame(
         TransportFrame.FILE_TRANSFER -> routeFileTransfer(from, decoded.body, registry)
         TransportFrame.TYPING_INDICATOR -> routeEphemeral(from, decoded.body, registry, TransportFrame.TYPING_INDICATOR)
         TransportFrame.PUBLISH_PREKEYS -> publishPreKeys(from, decoded.body, preKeys)
-        TransportFrame.FETCH_PREKEYS -> fetchPreKeys(from, decoded.body, preKeys)
+        // DoS: PreKeyDirectory.fetch() pops one one-time prekey off the target's pool per call --
+        // with no cap, any connected device could name any target and burn through their whole OTP
+        // pool for free, forcing every one of that target's future sessions to fall back to the
+        // weaker no-OTP 3-DH path. Reuses GroupEventRateLimiter's generic per-device sliding window
+        // rather than a second copy of the same bucket logic.
+        TransportFrame.FETCH_PREKEYS -> {
+            if (preKeyFetchRateLimiter.allow(from.staticPublicKeyHex)) {
+                fetchPreKeys(from, decoded.body, preKeys)
+            } else {
+                logger.info("rate-limiting prekey fetches from ${from.staticPublicKeyHex}")
+            }
+        }
         TransportFrame.PUSH_REGISTER -> registerPush(from, decoded.body, pushRegistry)
         TransportFrame.TURN_CREDENTIALS_REQUEST -> issueTurnCredentials(from, turnCredentialsIssuer)
         else -> logger.info("dropping unknown frame type ${decoded.type} from ${from.staticPublicKeyHex}")

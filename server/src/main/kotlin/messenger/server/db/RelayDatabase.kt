@@ -24,12 +24,24 @@ object RelayDatabase {
         val (rawUser, rawPassword) = (uri.userInfo ?: "").split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
         val user = URLDecoder.decode(rawUser, StandardCharsets.UTF_8)
         val password = URLDecoder.decode(rawPassword, StandardCharsets.UTF_8)
+        // SECURITY: this used to be `uri.query ?: "sslmode=require"` -- correct only when the URL's
+        // query string is entirely absent. Any query at all (a pooler param a managed Postgres
+        // provider tacks on, e.g. Neon/Supabase's own connection-string extras) replaced the
+        // fallback outright, silently dropping TLS enforcement and letting pgjdbc's default
+        // sslmode=prefer fall back to a cleartext connection if the server allows it. Now: keep the
+        // caller's query string as-is if they set their own sslmode (they may need verify-ca with a
+        // specific root cert for a given provider), otherwise always append verify-full -- not just
+        // require, which encrypts but never checks the server's certificate against anything, so an
+        // on-path MITM between the relay and its database is otherwise undetectable.
+        val existingParams = (uri.query ?: "").split("&").filter { it.isNotEmpty() }
+        val hasSslMode = existingParams.any { it.substringBefore("=") == "sslmode" }
+        val query = if (hasSslMode) uri.query!! else (existingParams + "sslmode=verify-full").joinToString("&")
         val jdbcUrl = buildString {
             append("jdbc:postgresql://")
             append(uri.host)
             if (uri.port != -1) append(":${uri.port}")
             append(uri.path)
-            append("?").append(uri.query ?: "sslmode=require")
+            append("?").append(query)
         }
         val config = HikariConfig().apply {
             this.jdbcUrl = jdbcUrl

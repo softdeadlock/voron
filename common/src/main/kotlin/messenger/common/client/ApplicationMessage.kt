@@ -77,6 +77,13 @@ object ApplicationMessage {
         // of :common, so the wire format never depends on a specific sticker set or ships any image
         // bytes of its own. Null means "not a sticker, `body` is the message content as usual".
         stickerId: Int? = null,
+        // The recipient used to stamp every incoming message with its own System.currentTimeMillis()
+        // at *decrypt* time, since there was nothing else to go on -- correct enough while online,
+        // but a message that sat mailboxed for hours while the recipient was offline would show up
+        // timestamped to whenever they next opened the app, not when it was actually sent, throwing
+        // off ordering relative to messages sent from other, currently-online conversations. Defaults
+        // to encode-time (effectively send-time) so existing callers get accurate timestamps for free.
+        sentAtMillis: Long = System.currentTimeMillis(),
     ): ByteArray {
         require(messageId.size == MESSAGE_ID_LENGTH) { "message id must be $MESSAGE_ID_LENGTH bytes" }
         require(senderAvatarIcon in 0..255) { "avatar icon selector must fit in a byte" }
@@ -113,7 +120,7 @@ object ApplicationMessage {
         require(stickerId == null || stickerId in 0..255) { "sticker id must fit in a byte" }
         val stickerSectionSize = if (stickerId != null) 2 else 1
 
-        val out = ByteArray(1 + nameBytes.size + 1 + MESSAGE_ID_LENGTH + replySectionSize + previewSectionSize + voiceSectionSize + stickerSectionSize + body.size)
+        val out = ByteArray(1 + nameBytes.size + 1 + MESSAGE_ID_LENGTH + replySectionSize + previewSectionSize + voiceSectionSize + stickerSectionSize + 8 + body.size)
         var offset = 0
         out[offset] = nameBytes.size.toByte(); offset += 1
         nameBytes.copyInto(out, offset); offset += nameBytes.size
@@ -156,6 +163,7 @@ object ApplicationMessage {
         } else {
             out[offset] = 0; offset += 1
         }
+        offset = putLong(out, offset, sentAtMillis)
         body.copyInto(out, offset)
         return out
     }
@@ -169,6 +177,8 @@ object ApplicationMessage {
         val linkPreview: LinkPreviewRef? = null,
         val voiceAttachment: VoiceAttachmentRef? = null,
         val stickerId: Int? = null,
+        /** Null on a message from a pre-sentAtMillis build — falls back to receive time, same as every message did before this field existed. */
+        val sentAtMillis: Long? = null,
     )
 
     /**
@@ -288,7 +298,13 @@ object ApplicationMessage {
         } else {
             null
         }
+        // Same tolerance as stickerId just above -- a pre-upgrade peer's message simply ends here.
+        val sentAtMillis = if (offset + 8 <= bytes.size) {
+            getLong(bytes, offset).also { offset += 8 }
+        } else {
+            null
+        }
         val body = bytes.copyOfRange(offset, bytes.size)
-        return Decoded(name, avatarIcon, messageId, body, replyTo, linkPreview, voiceAttachment, stickerId)
+        return Decoded(name, avatarIcon, messageId, body, replyTo, linkPreview, voiceAttachment, stickerId, sentAtMillis)
     }
 }

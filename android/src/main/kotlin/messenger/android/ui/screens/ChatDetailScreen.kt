@@ -103,6 +103,8 @@ fun ChatDetailScreen(
     peerKeyHex: String,
     peerAvatarIconId: AvatarIconId?,
     isVerified: Boolean,
+    ownSigningKeyHex: String? = null,
+    peerSigningKeyHex: String? = null,
     messages: List<ChatMessage>,
     messageInput: String,
     onMessageInputChange: (String) -> Unit,
@@ -669,8 +671,15 @@ fun ChatDetailScreen(
     }
 
     if (showSafetyNumber) {
-        val safetyNumber = remember(ownKeyHex, peerKeyHex) {
-            SafetyNumber.format(SafetyNumber.compute(ownKeyHex.hexToByteArray(), peerKeyHex.hexToByteArray()))
+        val safetyNumber = remember(ownKeyHex, peerKeyHex, ownSigningKeyHex, peerSigningKeyHex) {
+            SafetyNumber.format(
+                SafetyNumber.compute(
+                    ownKeyHex.hexToByteArray(),
+                    peerKeyHex.hexToByteArray(),
+                    ownSigningKeyHex?.hexToByteArray(),
+                    peerSigningKeyHex?.hexToByteArray(),
+                ),
+            )
         }
         SafetyNumberSheet(
             peerNickname = peerNickname,

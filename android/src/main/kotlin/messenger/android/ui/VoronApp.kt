@@ -65,6 +65,7 @@ import messenger.android.ui.screens.SettingsScreen
 import messenger.android.ui.screens.UpdateAvailableSheet
 import messenger.android.ui.theme.voronEncryptedColor
 import messenger.common.client.ApplicationMessage
+import messenger.common.util.hexToByteArray
 import messenger.common.util.toHex
 
 private fun hexToBytes(hex: String): ByteArray =
@@ -357,6 +358,8 @@ private fun VoronMainContent(
                 peerKeyHex = peerKeyHex,
                 peerAvatarIconId = appState.avatarIconFor(peerKeyHex),
                 isVerified = appState.isVerified(peerKeyHex),
+                ownSigningKeyHex = appState.client?.identity?.signingIdentityPublicKey?.toHex(),
+                peerSigningKeyHex = appState.client?.pinnedSigningIdentityKeyFor(peerKeyHex.hexToByteArray())?.toHex(),
                 messages = appState.conversationFor(peerKeyHex),
                 messageInput = messageInput,
                 onMessageInputChange = {

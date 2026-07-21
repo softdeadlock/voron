@@ -53,6 +53,9 @@ data class GroupState(
     val members: Map<String, GroupMember>, // keyed by dhKey.toHex()
     val announcementMode: Boolean,
     val inviteLinksEnabled: Boolean,
+    // 0 = no icon chosen (show the group's initial letter, same "0 means none" convention as
+    // messenger.android.data.AvatarIconId.wireValue) -- see GroupEventPayloads.encodeGroupInfo.
+    val avatarIconId: Int = 0,
 ) {
     val ownerKeyHex: String? get() = members.values.firstOrNull { it.role == GroupRole.OWNER }?.dhKey?.toHex()
 
@@ -64,7 +67,8 @@ data class GroupState(
         if (this === other) return true
         if (other !is GroupState) return false
         return groupId.contentEquals(other.groupId) && name == other.name && members == other.members &&
-            announcementMode == other.announcementMode && inviteLinksEnabled == other.inviteLinksEnabled
+            announcementMode == other.announcementMode && inviteLinksEnabled == other.inviteLinksEnabled &&
+            avatarIconId == other.avatarIconId
     }
 
     override fun hashCode(): Int {
@@ -73,6 +77,7 @@ data class GroupState(
         result = 31 * result + members.hashCode()
         result = 31 * result + announcementMode.hashCode()
         result = 31 * result + inviteLinksEnabled.hashCode()
+        result = 31 * result + avatarIconId
         return result
     }
 
@@ -122,8 +127,24 @@ object GroupEventPayloads {
         return PromoteAdminPayload(memberDhKey, permissions)
     }
 
-    fun encodeGroupInfo(name: String): ByteArray = encodeString(name)
-    fun decodeGroupInfoName(payload: ByteArray): String = decodeString(ByteBuffer.wrap(payload))
+    data class GroupInfoPayload(val name: String, val avatarIconId: Int)
+
+    /** [avatarIconId] follows the same "0 means none" convention as [GroupState.avatarIconId]. */
+    fun encodeGroupInfo(name: String, avatarIconId: Int = 0): ByteArray {
+        val nameBytes = encodeString(name)
+        val buffer = ByteBuffer.allocate(nameBytes.size + 1)
+        buffer.put(nameBytes)
+        buffer.put(avatarIconId.toByte())
+        return buffer.array()
+    }
+
+    /** Tolerates an older build's SET_GROUP_INFO payload with no trailing avatar byte at all — [avatarIconId] just decodes as 0 (unchanged) rather than throwing. */
+    fun decodeGroupInfo(payload: ByteArray): GroupInfoPayload {
+        val buffer = ByteBuffer.wrap(payload)
+        val name = decodeString(buffer)
+        val avatarIconId = if (buffer.hasRemaining()) buffer.get().toInt() and 0xFF else 0
+        return GroupInfoPayload(name, avatarIconId)
+    }
 
     fun encodeBoolean(value: Boolean): ByteArray = byteArrayOf(if (value) 1 else 0)
     fun decodeBoolean(payload: ByteArray): Boolean = payload.isNotEmpty() && payload[0] != 0.toByte()

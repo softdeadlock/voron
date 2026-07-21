@@ -36,12 +36,14 @@ class E2eeSessionTest {
         val published = bobStore.publishedPreKeys(oneTimeCount = 5)
         val bundle = bundleFrom(published, otpIndex = 0)
 
-        val init = X3dhLite.initiate(aliceId.dhIdentity, bobId.dhIdentityPublicKey, bundle)
+        val init = X3dhLite.initiate(aliceId.dhIdentity, bobId.dhIdentityPublicKey, bundle, initiatorSigningIdentityKey = aliceId.signingIdentityPublicKey)
         val resp = X3dhLite.respond(
             responderDhIdentity = bobId.dhIdentity,
+            responderSigningIdentityKey = bobId.signingIdentityPublicKey,
             signedPreKey = bobStore.signedPreKeyFor(bundle.signedPreKeyId)!!,
             oneTimePreKey = bobStore.consumeOneTimePreKey(bundle.oneTimePreKeyId),
             initiatorDhIdentityKey = aliceId.dhIdentityPublicKey,
+            initiatorSigningIdentityKey = aliceId.signingIdentityPublicKey,
             initiatorEphemeralKey = init.ephemeralPublicKey,
         )
 
@@ -57,12 +59,14 @@ class E2eeSessionTest {
         val published = bobStore.publishedPreKeys(oneTimeCount = 0)
         val bundle = bundleFrom(published, otpIndex = null)
 
-        val init = X3dhLite.initiate(aliceId.dhIdentity, bobId.dhIdentityPublicKey, bundle)
+        val init = X3dhLite.initiate(aliceId.dhIdentity, bobId.dhIdentityPublicKey, bundle, initiatorSigningIdentityKey = aliceId.signingIdentityPublicKey)
         val resp = X3dhLite.respond(
             responderDhIdentity = bobId.dhIdentity,
+            responderSigningIdentityKey = bobId.signingIdentityPublicKey,
             signedPreKey = bobStore.signedPreKeyFor(bundle.signedPreKeyId)!!,
             oneTimePreKey = null,
             initiatorDhIdentityKey = aliceId.dhIdentityPublicKey,
+            initiatorSigningIdentityKey = aliceId.signingIdentityPublicKey,
             initiatorEphemeralKey = init.ephemeralPublicKey,
         )
         assertArrayEquals(init.rootKey, resp.rootKey)
@@ -79,7 +83,7 @@ class E2eeSessionTest {
             published.signedPreKey, tamperedSig, PreKeyBundle.NO_ONE_TIME_PREKEY, null,
         )
         assertThrows(BadPreKeySignature::class.java) {
-            X3dhLite.initiate(DeviceIdentity.generate().dhIdentity, published.dhIdentityKey, forged)
+            X3dhLite.initiate(DeviceIdentity.generate().dhIdentity, published.dhIdentityKey, forged, initiatorSigningIdentityKey = ByteArray(32))
         }
     }
 
@@ -95,7 +99,7 @@ class E2eeSessionTest {
 
         val intendedPeerKey = DeviceIdentity.generate().dhIdentityPublicKey
         assertThrows(UnexpectedBundleIdentity::class.java) {
-            X3dhLite.initiate(aliceId.dhIdentity, intendedPeerKey, attackerBundle)
+            X3dhLite.initiate(aliceId.dhIdentity, intendedPeerKey, attackerBundle, initiatorSigningIdentityKey = aliceId.signingIdentityPublicKey)
         }
     }
 
@@ -178,7 +182,7 @@ class E2eeSessionTest {
 
         val initial = aliceManager.encrypt(bobId.dhIdentityPublicKey, bundle, "secret".toByteArray()) as E2eeMessage.Initial
         val tampered = E2eeMessage.Initial(
-            initial.initiatorDhIdentityKey, initial.initiatorEphemeralKey,
+            initial.initiatorDhIdentityKey, initial.initiatorSigningIdentityKey, initial.initiatorEphemeralKey,
             initial.signedPreKeyId, initial.oneTimePreKeyId,
             RatchetPayload(
                 initial.payload.senderRatchetPublicKey,
@@ -195,7 +199,7 @@ class E2eeSessionTest {
     @Test
     fun `wire encoding round trips for initial and normal messages`() {
         val initial = E2eeMessage.Initial(
-            ByteArray(32) { 1 }, ByteArray(32) { 2 }, 7, 9,
+            ByteArray(32) { 1 }, ByteArray(32) { 4 }, ByteArray(32) { 2 }, 7, 9,
             RatchetPayload(ByteArray(32) { 5 }, 11, 3, "abc".toByteArray()),
         )
         val decodedInitial = E2eeMessage.decode(initial.encode()) as E2eeMessage.Initial

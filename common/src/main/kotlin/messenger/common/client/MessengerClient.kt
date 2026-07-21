@@ -57,6 +57,8 @@ data class IncomingMessage(
     val linkPreview: ApplicationMessage.LinkPreviewRef? = null,
     val voiceAttachment: ApplicationMessage.VoiceAttachmentRef? = null,
     val stickerId: Int? = null,
+    /** Null from a pre-upgrade peer — see [ApplicationMessage.Decoded.sentAtMillis]. */
+    val sentAtMillis: Long? = null,
 )
 
 /** [messageId] is the hex ID returned by the [MessengerClient.sendMessage] call that produced the now-delivered message. */
@@ -433,6 +435,7 @@ class MessengerClient(
                 application.linkPreview,
                 application.voiceAttachment,
                 application.stickerId,
+                application.sentAtMillis,
             ),
         )
         sendDeliveryAck(envelope.peerStaticPublicKey, application.messageId)
@@ -471,6 +474,9 @@ class MessengerClient(
         }
         flow.tryEmit(DeliveryAck(envelope.peerStaticPublicKey, messageId.toHex()))
     }
+
+    /** [peerDhIdentityKey]'s pinned Ed25519 signing identity, or null if none is pinned yet (no session ever established) — see [E2eeManager.pinnedSigningIdentityKey] and [messenger.common.e2ee.SafetyNumber.compute]'s `signingKeyA`/`signingKeyB`. */
+    fun pinnedSigningIdentityKeyFor(peerDhIdentityKey: ByteArray): ByteArray? = e2ee.pinnedSigningIdentityKey(peerDhIdentityKey)
 
     /**
      * Best-effort "I'm typing" ping to [peerDhIdentityKey]. Silently does nothing without an
@@ -713,7 +719,14 @@ class MessengerClient(
     /** Resends this device's current group sender key to whoever asked, if we actually have a session (and thus a key) for the group they named *and* [groupMembershipChecker] confirms they're still a member — a stale/forged request naming an unknown group, or one from someone no longer in it, is silently ignored. */
     private suspend fun handleGroupKeyRequest(body: ByteArray) {
         val (envelope, groupId) = decryptEnvelope(body, "group key request") { it } ?: return
-        if (groupMembershipChecker?.invoke(groupId, envelope.peerStaticPublicKey) == false) return
+        // SECURITY: fail CLOSED, not open, when no checker is wired -- `checker == null` used to
+        // fall through to "allow" (only an explicit `false` result blocked the request), which
+        // would hand out a live group sender key to any requester on any deployment that forgot to
+        // wire GroupManager.attach (or any future caller of this class that doesn't support groups
+        // at all). There's no legitimate reason to answer a GROUP_KEY_REQUEST when this device has
+        // no way to check membership for it.
+        val checker = groupMembershipChecker
+        if (checker == null || !checker(groupId, envelope.peerStaticPublicKey)) return
         val currentKey = groupSessions[groupId.toHex()]?.currentSenderKeyMessageOrNull() ?: return
         runCatching { sendGroupSenderKey(envelope.peerStaticPublicKey, currentKey) }
     }

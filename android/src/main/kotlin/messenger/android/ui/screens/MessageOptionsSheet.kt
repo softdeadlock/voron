@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
@@ -55,6 +56,7 @@ fun MessageOptionsSheet(
     onDelete: () -> Unit,
     onEdit: () -> Unit,
     onReact: (String) -> Unit,
+    onSelect: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -95,6 +97,7 @@ fun MessageOptionsSheet(
             Spacer(Modifier.width(4.dp))
             MessageOptionRow(icon = Icons.AutoMirrored.Filled.Reply, label = "Reply", onClick = onReply)
             MessageOptionRow(icon = Icons.Filled.ContentCopy, label = "Copy text", onClick = onCopy)
+            MessageOptionRow(icon = Icons.Filled.CheckCircleOutline, label = "Select", onClick = onSelect)
             if (isFromMe) {
                 MessageOptionRow(icon = Icons.Filled.Edit, label = "Edit message", onClick = onEdit)
             }

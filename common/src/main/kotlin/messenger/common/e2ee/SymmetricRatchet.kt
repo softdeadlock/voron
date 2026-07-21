@@ -51,6 +51,13 @@ class ReceivingChain(private var chainKey: ByteArray, private val maxSkip: Int =
      */
     fun messageKeyFor(number: Int): ByteArray {
         skipped.remove(number)?.let { return it }
+        // number/targetCount below come straight from a decoded RatchetPayload header -- an
+        // attacker-controlled signed Int, so a negative value is representable on the wire even
+        // though it's never a real message count. `number >= counter` already rejects it in
+        // practice (counter is never negative), but that's incidental to the comparison, not an
+        // explicit guard -- state it directly so the invariant doesn't silently depend on counter's
+        // sign never changing.
+        require(number >= 0) { "negative message number: $number" }
         require(number >= counter) { "message key for #$number already consumed" }
         require(number - counter <= maxSkip) { "too many skipped messages (${number - counter})" }
         while (counter < number) {
@@ -74,6 +81,7 @@ class ReceivingChain(private var chainKey: ByteArray, private val maxSkip: Int =
      * derivation and memory growth.
      */
     fun retireSkippingTo(targetCount: Int): Map<Int, ByteArray> {
+        require(targetCount >= 0) { "negative target count: $targetCount" }
         require(targetCount - counter <= maxSkip) { "too many messages to skip on chain retirement (${targetCount - counter})" }
         val out = HashMap<Int, ByteArray>(skipped)
         while (counter < targetCount) {

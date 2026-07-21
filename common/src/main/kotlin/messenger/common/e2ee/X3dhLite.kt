@@ -69,6 +69,15 @@ object X3dhLite {
         expectedPeerDhIdentityKey: ByteArray,
         bundle: PreKeyBundle,
         expectedPeerSigningIdentityKey: ByteArray? = null,
+        // SECURITY: dhIdentity and signingIdentity are independently-generated keypairs (see
+        // DeviceIdentity) with no cryptographic binding between them -- unlike Signal, which derives
+        // both from the same Curve25519 key via a Montgomery<->Edwards conversion, so substituting
+        // one necessarily substitutes the other. Without the signing key folded in here too, a
+        // relay serving `dhIdentityKey` untouched but its own self-signed `signingIdentityKey` on
+        // first contact (TOFU, nothing pinned yet) produces an AD/root key indistinguishable from
+        // the real thing on the initiator's side, AND a SafetyNumber (see that class) that used to
+        // hash only DH keys couldn't reveal it either. Both now include the signing identity.
+        initiatorSigningIdentityKey: ByteArray,
     ): InitiatorResult {
         if (!bundle.dhIdentityKey.contentEquals(expectedPeerDhIdentityKey)) {
             throw UnexpectedBundleIdentity(expectedPeerDhIdentityKey.toHex(), bundle.dhIdentityKey.toHex())
@@ -105,7 +114,7 @@ object X3dhLite {
             return InitiatorResult(
                 rootKey = Hkdf.derive(ikm, ROOT_INFO, ROOT_KEY_LENGTH),
                 ephemeralPublicKey = ephemeral.publicKey,
-                associatedData = initiatorDhIdentity.publicKey + bundle.dhIdentityKey,
+                associatedData = initiatorDhIdentity.publicKey + initiatorSigningIdentityKey + bundle.dhIdentityKey + bundle.signingIdentityKey,
                 usedSignedPreKeyId = bundle.signedPreKeyId,
                 usedOneTimePreKeyId = bundle.oneTimePreKeyId,
                 usedSigningIdentityKey = bundle.signingIdentityKey,
@@ -125,9 +134,11 @@ object X3dhLite {
      */
     fun respond(
         responderDhIdentity: NoiseStaticKeyPair,
+        responderSigningIdentityKey: ByteArray,
         signedPreKey: NoiseStaticKeyPair,
         oneTimePreKey: NoiseStaticKeyPair?,
         initiatorDhIdentityKey: ByteArray,
+        initiatorSigningIdentityKey: ByteArray,
         initiatorEphemeralKey: ByteArray,
     ): ResponderResult {
         var dh1: ByteArray? = null
@@ -144,7 +155,7 @@ object X3dhLite {
 
             return ResponderResult(
                 rootKey = Hkdf.derive(ikm, ROOT_INFO, ROOT_KEY_LENGTH),
-                associatedData = initiatorDhIdentityKey + responderDhIdentity.publicKey,
+                associatedData = initiatorDhIdentityKey + initiatorSigningIdentityKey + responderDhIdentity.publicKey + responderSigningIdentityKey,
             )
         } finally {
             // responderDhIdentity/signedPreKey/oneTimePreKey are owned by the caller (PreKeyStore

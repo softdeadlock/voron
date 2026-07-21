@@ -20,15 +20,22 @@ sealed interface E2eeMessage {
 
     class Initial(
         val initiatorDhIdentityKey: ByteArray,
+        // Carried on the wire (not just implied by whoever's DH key this is) so the responder can
+        // fold it into X3dhLite's associated data on their side too -- see X3dhLite.respond's
+        // initiatorSigningIdentityKey param. Without it, only the *initiator* could bind the
+        // signing identity into the shared AD, since the responder would have no way to know what
+        // it was.
+        val initiatorSigningIdentityKey: ByteArray,
         val initiatorEphemeralKey: ByteArray,
         val signedPreKeyId: Int,
         val oneTimePreKeyId: Int,
         val payload: RatchetPayload,
     ) : E2eeMessage {
         override fun encode(): ByteArray {
-            val buffer = ByteBuffer.allocate(1 + 32 + 32 + 4 + 4 + RatchetPayload.HEADER_LENGTH + payload.ciphertext.size)
+            val buffer = ByteBuffer.allocate(1 + 32 + 32 + 32 + 4 + 4 + RatchetPayload.HEADER_LENGTH + payload.ciphertext.size)
             buffer.put(TYPE_INITIAL)
             buffer.put(initiatorDhIdentityKey)
+            buffer.put(initiatorSigningIdentityKey)
             buffer.put(initiatorEphemeralKey)
             buffer.putInt(signedPreKeyId)
             buffer.putInt(oneTimePreKeyId)
@@ -57,12 +64,13 @@ sealed interface E2eeMessage {
             val buffer = ByteBuffer.wrap(bytes)
             return when (val type = buffer.get()) {
                 TYPE_INITIAL -> {
-                    require(buffer.remaining() >= 32 + 32 + 4 + 4 + RatchetPayload.HEADER_LENGTH) { "truncated initial message" }
+                    require(buffer.remaining() >= 32 + 32 + 32 + 4 + 4 + RatchetPayload.HEADER_LENGTH) { "truncated initial message" }
                     val ik = ByteArray(32).also { buffer.get(it) }
+                    val signIk = ByteArray(32).also { buffer.get(it) }
                     val ek = ByteArray(32).also { buffer.get(it) }
                     val spkId = buffer.int
                     val opkId = buffer.int
-                    Initial(ik, ek, spkId, opkId, RatchetPayload.decodeFrom(buffer))
+                    Initial(ik, signIk, ek, spkId, opkId, RatchetPayload.decodeFrom(buffer))
                 }
                 TYPE_NORMAL -> {
                     require(buffer.remaining() >= RatchetPayload.HEADER_LENGTH) { "truncated normal message" }

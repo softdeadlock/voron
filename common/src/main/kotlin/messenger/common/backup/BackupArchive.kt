@@ -63,13 +63,26 @@ object BackupArchive {
         return buffer.array()
     }
 
+    /**
+     * CRASH: the AEAD tag having verified only proves this plaintext came from someone who knows
+     * [phrase] (or is this device's own past self) -- it says nothing about [nameLength]/[dataLength]
+     * being sane, since they're read straight out of that same plaintext. A corrupted archive (disk
+     * damage, a truncated file) or a deliberately malformed one crafted by anyone who *does* know the
+     * phrase would otherwise throw an unbounded [java.nio.BufferUnderflowException] (declared length
+     * past what's left) or attempt a multi-gigabyte allocation from a garbage [dataLength] before
+     * ever getting there. Bounds-checked the same way every other decoder in this codebase treats a
+     * malformed-but-authentic-looking payload: a clear rejection, not an unguarded crash.
+     */
     private fun decodeSections(plaintext: ByteArray): Map<String, ByteArray> {
         val buffer = ByteBuffer.wrap(plaintext)
         val sections = LinkedHashMap<String, ByteArray>()
         while (buffer.hasRemaining()) {
+            require(buffer.remaining() >= 2) { "truncated backup archive (section name length)" }
             val nameLength = buffer.short.toInt() and 0xFFFF
+            require(buffer.remaining() >= nameLength + 4) { "truncated backup archive (section name/data length)" }
             val nameBytes = ByteArray(nameLength).also { buffer.get(it) }
             val dataLength = buffer.int
+            require(dataLength >= 0 && buffer.remaining() >= dataLength) { "truncated backup archive (section data)" }
             val data = ByteArray(dataLength).also { buffer.get(it) }
             sections[String(nameBytes, Charsets.UTF_8)] = data
         }
