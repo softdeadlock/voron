@@ -104,6 +104,9 @@ fun SettingsScreen(
     onAppLockChange: (Boolean) -> Unit,
     appVersionLabel: String,
     onFetchCanary: suspend () -> messenger.android.data.CanaryInfo?,
+    contacts: List<messenger.android.data.Contact>,
+    onLoadDeadManSwitchConfig: () -> messenger.android.data.DeadManSwitchConfig,
+    onSaveDeadManSwitchConfig: (messenger.android.data.DeadManSwitchConfig) -> Unit,
     onBack: () -> Unit,
 ) {
     var showClearHistory by remember { mutableStateOf(false) }
@@ -112,6 +115,8 @@ fun SettingsScreen(
     var canaryInfo by remember { mutableStateOf<messenger.android.data.CanaryInfo?>(null) }
     var canaryLoading by remember { mutableStateOf(false) }
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    var showDeadManSwitch by remember { mutableStateOf(false) }
+    var deadManSwitchConfig by remember { mutableStateOf(onLoadDeadManSwitchConfig()) }
     var showRestoreBackup by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -225,6 +230,13 @@ fun SettingsScreen(
                     onCheckedChange = onAppLockChange,
                 )
             }
+            ActionCard(
+                icon = Icons.Filled.Fingerprint,
+                label = "Dead man's switch",
+                detail = if (deadManSwitchConfig.enabled) "Armed — fires after ${deadManSwitchConfig.intervalDays}d of inactivity" else "Off",
+                destructive = deadManSwitchConfig.enabled,
+                onClick = { showDeadManSwitch = true },
+            )
 
             Spacer(Modifier.height(28.dp))
             SectionLabel("Privacy")
@@ -386,6 +398,18 @@ fun SettingsScreen(
             info = canaryInfo,
             loading = canaryLoading,
             onDismiss = { showCanary = false },
+        )
+    }
+
+    if (showDeadManSwitch) {
+        DeadManSwitchSheet(
+            initialConfig = deadManSwitchConfig,
+            contacts = contacts,
+            onDismiss = { showDeadManSwitch = false },
+            onSave = { next ->
+                onSaveDeadManSwitchConfig(next)
+                deadManSwitchConfig = next
+            },
         )
     }
 

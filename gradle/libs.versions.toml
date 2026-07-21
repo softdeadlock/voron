@@ -14,6 +14,7 @@ androidx-lifecycle-runtime-ktx = "2.9.4"
 androidx-navigation-compose = "2.9.5"
 androidx-security-crypto = "1.1.0-alpha06"
 androidx-biometric = "1.1.0"
+androidx-work = "2.10.0"
 stream-webrtc = "1.1.1"
 unifiedpush = "3.0.5"
 postgresql = "42.7.4"
@@ -53,6 +54,7 @@ androidx-compose-foundation = { module = "androidx.compose.foundation:foundation
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "androidx-navigation-compose" }
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "androidx-security-crypto" }
 androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "androidx-biometric" }
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "androidx-work" }
 stream-webrtc-android = { module = "io.getstream:stream-webrtc-android", version.ref = "stream-webrtc" }
 unifiedpush-connector = { module = "org.unifiedpush.android:connector", version.ref = "unifiedpush" }
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }

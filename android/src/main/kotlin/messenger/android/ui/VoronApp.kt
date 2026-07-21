@@ -82,6 +82,8 @@ class VoronActions(
     val sendMessage: (peerKeyHex: String, text: String, replyTo: ChatMessage?, linkPreview: ApplicationMessage.LinkPreviewRef?) -> Unit,
     val fetchLinkPreview: suspend (String) -> ApplicationMessage.LinkPreviewRef?,
     val fetchCanary: suspend () -> messenger.android.data.CanaryInfo?,
+    val loadDeadManSwitchConfig: () -> messenger.android.data.DeadManSwitchConfig,
+    val saveDeadManSwitchConfig: (messenger.android.data.DeadManSwitchConfig) -> Unit,
     val sendFile: (peerKeyHex: String, uri: Uri) -> Unit,
     val sendVoiceMessage: (peerKeyHex: String, file: File, durationMillis: Long) -> Unit,
     val sendSticker: (peerKeyHex: String, sticker: StickerId) -> Unit,
@@ -344,6 +346,9 @@ private fun VoronMainContent(
                 onAppLockChange = actions.setAppLock,
                 appVersionLabel = appVersionLabel,
                 onFetchCanary = actions.fetchCanary,
+                contacts = appState.contacts,
+                onLoadDeadManSwitchConfig = actions.loadDeadManSwitchConfig,
+                onSaveDeadManSwitchConfig = actions.saveDeadManSwitchConfig,
                 onBack = {
                     if (navController.currentBackStackEntry?.isResumed() != false) {
                         navController.popBackStack()

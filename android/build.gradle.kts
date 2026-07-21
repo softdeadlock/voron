@@ -83,6 +83,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.biometric)
+    implementation(libs.androidx.work.runtime.ktx)
     // androidx.biometric:1.1.0 (2021) transitively pulls androidx.fragment:1.2.5, and nothing
     // else in the graph asks for anything newer — plain Gradle conflict resolution then leaves
     // that ancient FragmentActivity in the APK. Its startActivityForResult unconditionally

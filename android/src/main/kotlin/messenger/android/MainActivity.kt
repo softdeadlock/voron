@@ -127,6 +127,8 @@ class MainActivity : FragmentActivity() {
             sendMessage = connectionManager::sendMessage,
             fetchLinkPreview = connectionManager::fetchLinkPreview,
             fetchCanary = connectionManager::fetchCanary,
+            loadDeadManSwitchConfig = app::loadDeadManSwitchConfig,
+            saveDeadManSwitchConfig = app::saveDeadManSwitchConfig,
             sendFile = connectionManager::sendFile,
             sendVoiceMessage = connectionManager::sendVoiceMessage,
             sendSticker = connectionManager::sendSticker,
