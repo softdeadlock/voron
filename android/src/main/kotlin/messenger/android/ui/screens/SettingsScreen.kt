@@ -346,19 +346,28 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(28.dp))
             SectionLabel("Backup")
-            ActionCard(
-                icon = Icons.Filled.CloudUpload,
-                label = "Back up account",
-                detail = "Encrypted export protected by a recovery phrase",
-                onClick = { showExportBackup = true },
-            )
-            Spacer(Modifier.height(8.dp))
-            ActionCard(
-                icon = Icons.Filled.CloudDownload,
-                label = "Restore from backup",
-                detail = "Replaces this device's identity, contacts, and history",
-                onClick = { showRestoreBackup = true },
-            )
+            Card(
+                colors = CardDefaults.cardColors(containerColor = voronNeutralIconContainerColor()),
+                shape = RoundedCornerShape(18.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column {
+                    ActionRow(
+                        icon = Icons.Filled.CloudUpload,
+                        label = "Back up account",
+                        detail = "Encrypted export protected by a recovery phrase",
+                        onClick = { showExportBackup = true },
+                    )
+                    DividerSpace()
+                    ActionRow(
+                        icon = Icons.Filled.CloudDownload,
+                        label = "Restore from backup",
+                        detail = "Replaces this device's identity, contacts, and history",
+                        onClick = { showRestoreBackup = true },
+                    )
+                }
+            }
 
             Spacer(Modifier.height(28.dp))
             SectionLabel("Data & storage")
