@@ -481,6 +481,19 @@ class ConnectionManager(
         VoronLog.d(TAG, "prekeys published")
         appState.pushEndpoint?.let { client.registerPush(it) }
 
+        // Metadata hiding: tell every contact we already have a live session with (not new ones —
+        // that would force a handshake purely to deliver an alias nobody asked for yet) this
+        // connection's fresh routing alias, so their next send can address us by that instead of
+        // our real device key. Best-effort per contact: one failure (send timeout, relay hiccup)
+        // shouldn't block telling the rest, and a contact who misses this update just falls back
+        // to addressing us by device key next time, per MessengerClient.encryptAndSend.
+        for (contact in appState.contacts) {
+            if (contact.deviceKeyHex == DRAFTS_DEVICE_KEY) continue
+            val peerKey = contact.deviceKeyHex.hexToByteArray()
+            if (!client.hasSession(peerKey)) continue
+            scope.launch { runCatching { client.sendRoutingAliasUpdate(peerKey) } }
+        }
+
         appState.client = client
         appState.onionCircuitActive = useOnion
         appState.connection = ConnectionState.Connected(client.identity.dhIdentityPublicKey.toHex())

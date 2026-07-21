@@ -72,7 +72,16 @@ class SqlPreKeyDirectory(private val dataSource: DataSource) : PreKeyDirectorySt
         }
     }
 
-    /** Builds a fetchable bundle for [deviceKeyHex], atomically popping one one-time prekey if any remain. */
+    /** Whether [deviceKeyHex] has ever published a bundle -- unlike [fetch], never consumes a one-time prekey. */
+    override fun contains(deviceKeyHex: String): Boolean {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT 1 FROM prekey_bundles WHERE device_hex = ?").use { select ->
+                select.setString(1, deviceKeyHex)
+                select.executeQuery().use { rows -> return rows.next() }
+            }
+        }
+    }
+
     override fun fetch(deviceKeyHex: String): PreKeyBundle? {
         dataSource.connection.use { connection ->
             connection.autoCommit = false

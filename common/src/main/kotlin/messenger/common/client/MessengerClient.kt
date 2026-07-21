@@ -249,6 +249,20 @@ class MessengerClient(
 
     private val random = SecureRandom()
 
+    // Metadata hiding: the relay's own ROUTE-family addressing normally uses
+    // identity.dhIdentityPublicKey directly, which means every frame this device ever sends or
+    // receives carries a stable, permanent identifier the relay can log/persist to build a social
+    // graph over time. A fresh random alias per connection, registered with the relay and told to
+    // contacts only over an already-E2E-encrypted channel (see sendRoutingAliasUpdate), lets
+    // contacts address this device by a value that means nothing on its own and rotates every
+    // reconnect -- see AliasStore on the relay side for the resolution step this enables. Falls
+    // back to the real identity key automatically (see encryptAndSend) for any contact who hasn't
+    // been told the current alias yet, so this is pure upside with no reachability regression.
+    @Volatile private var currentRoutingAlias: ByteArray = ByteArray(RoutingEnvelope.PEER_KEY_LENGTH).also { random.nextBytes(it) }
+
+    /** The most recently received routing alias for each contact (by their real DH identity key hex), used to address them without their stable identity key -- see [currentRoutingAlias]. */
+    private val peerRoutingAliases = ConcurrentHashMap<String, ByteArray>()
+
     @Volatile private var closingIntentionally = false
 
     // Fires once if the socket dies on its own (ping timeout, network drop, relay restart) —
@@ -280,6 +294,11 @@ class MessengerClient(
         val firstReply = session.incoming.receive()
         require(firstReply is Frame.Binary) { "expected binary Noise_IK reply, got $firstReply" }
         transportSession = initiator.consumeMessage2(decodeIncoming(firstReply.readBytes()))
+
+        // Fresh alias every reconnect (not just every rotation) -- a stale alias from a previous
+        // connection is meaningless to a relay that no longer has it registered to anyone anyway.
+        currentRoutingAlias = ByteArray(RoutingEnvelope.PEER_KEY_LENGTH).also { random.nextBytes(it) }
+        outgoing.send(TransportFrame.encode(TransportFrame.REGISTER_ALIAS, currentRoutingAlias))
 
         val writerJob = scope.launch { writerLoop(encodeOutgoing) }
         val readerJob = scope.launch { readerLoop(decodeIncoming) }
@@ -355,6 +374,7 @@ class MessengerClient(
                     TransportFrame.GROUP_CONTROL_SYNC_REQUEST -> handleGroupSyncRequest(decoded.body)
                     TransportFrame.GROUP_JOIN_REQUEST -> handleGroupJoinRequest(decoded.body)
                     TransportFrame.TURN_CREDENTIALS_RESULT -> handleTurnCredentialsResult(decoded.body)
+                    TransportFrame.ALIAS_UPDATE -> handleRoutingAliasUpdate(decoded.body)
                     else -> logger.warn("ignoring unexpected frame type ${decoded.type}")
                 }
             }
@@ -497,6 +517,13 @@ class MessengerClient(
         mutableTypingIndicators.tryEmit(envelope.peerStaticPublicKey)
     }
 
+    /** Caches [peerRoutingAliases] from a peer's [sendRoutingAliasUpdate] -- malformed (wrong-length) aliases are dropped rather than cached, since a bad one would just make future sends to them silently vanish at the relay (see AliasStore.resolve's fallback). */
+    private fun handleRoutingAliasUpdate(body: ByteArray) {
+        val (envelope, alias) = decryptEnvelope(body, "routing alias update") { it } ?: return
+        if (alias.size != RoutingEnvelope.PEER_KEY_LENGTH) return
+        peerRoutingAliases[envelope.peerStaticPublicKey.toHex()] = alias
+    }
+
     // SECURITY (2026-07-21, revised same day after external review): this used to carry an empty
     // payload -- just [peer key] with nothing proving who sent it, letting a malicious relay forge
     // it directly into any device's queue with an arbitrary claimed sender. Signing closed that,
@@ -589,6 +616,9 @@ class MessengerClient(
         }
     }
 
+    /** Whether an E2EE session with [peerDhIdentityKey] already exists -- used to decide whether sending them something (e.g. a routing-alias update) would need a fresh handshake first, without actually triggering one. */
+    fun hasSession(peerDhIdentityKey: ByteArray): Boolean = e2ee.hasSession(peerDhIdentityKey)
+
     /**
      * The shared tail of every authenticated send: ensure an E2EE session exists (fetching the
      * peer's prekey bundle for a first contact — deliberately *outside* [encryptMutex], so one
@@ -603,9 +633,33 @@ class MessengerClient(
             null
         }
         val message = encryptMutex.withLock { e2ee.encrypt(peerDhIdentityKey, bundle, plaintext) }
-        val envelope = RoutingEnvelope.encode(peerDhIdentityKey, message.encode())
+        // SECURITY/RELIABILITY (audit finding, 2026-07-21): only FILE_TRANSFER ever addresses by
+        // alias, not every frameType -- restricted here on purpose, after a PoC (see
+        // AliasExpiryMessageLossTest, server-side) showed a stale/expired cached alias for RELIABLE
+        // frame types (ROUTE, REACTION, EDIT_MESSAGE, CALL_SIGNAL's push-mailboxed path, group
+        // frames) causes the relay to mailbox the frame under alias bytes nobody will ever poll --
+        // permanent, silent loss, with no automatic retry in this codebase to recover it.
+        // FILE_TRANSFER is the one frame type the relay NEVER mailboxes (see routeFileTransfer): an
+        // unresolvable alias just means an immediate, visible FILE_UNAVAILABLE reply to the sender
+        // instead of a stuck-forever transfer, so staleness degrades loudly rather than silently.
+        val addressKey = if (frameType == TransportFrame.FILE_TRANSFER) {
+            peerRoutingAliases[peerDhIdentityKey.toHex()] ?: peerDhIdentityKey
+        } else {
+            peerDhIdentityKey
+        }
+        val envelope = RoutingEnvelope.encode(addressKey, message.encode())
         outgoing.send(TransportFrame.encode(frameType, envelope))
     }
+
+    /**
+     * Tells [peerDhIdentityKey] this device's current routing alias (see [currentRoutingAlias]),
+     * E2E-encrypted so the relay only ever learns "some device rotated some alias," never which
+     * contact was told. Callers should send this to every contact right after [connect] and again
+     * whenever [currentRoutingAlias] is rotated -- MessengerClient has no contact list of its own,
+     * so it can't do this fan-out itself.
+     */
+    suspend fun sendRoutingAliasUpdate(peerDhIdentityKey: ByteArray) =
+        encryptAndSend(peerDhIdentityKey, TransportFrame.ALIAS_UPDATE, currentRoutingAlias)
 
     /**
      * Encrypts and sends [plaintext] to [peerDhIdentityKey], fetching a prekey bundle first if

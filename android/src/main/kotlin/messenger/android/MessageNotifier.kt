@@ -46,6 +46,13 @@ class MessageNotifier(private val context: Context) {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // SECURITY (audit finding, 2026-07-21): left unset, whether the lock screen shows this
+            // notification's content without unlocking the device is entirely up to the OS/OEM
+            // default -- on plenty of stock Android configurations, that default is "show it in
+            // full." For an E2EE-privacy-focused app, the single most common real-world exposure
+            // is a stolen/borrowed/momentarily-unattended phone, not a network attacker -- so this
+            // shouldn't be left to chance regardless of the hideSender/hideContent settings above.
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
 
         NotificationManagerCompat.from(context).notify(peerKeyHex.hashCode(), notification)

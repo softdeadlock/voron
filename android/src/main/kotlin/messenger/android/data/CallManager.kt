@@ -389,6 +389,12 @@ class CallManager(private val appContext: Context, private val appState: AppStat
     private fun handleAnswer(signal: IncomingCallSignal.Signal) {
         VoronLog.d(TAG, "ANSWER received")
         if (signal.callId != currentCallId) return
+        // Defense in depth (audit finding, 2026-07-21): callId is an unguessable random UUID, so
+        // this isn't exploitable today, but cross-checking the cryptographically-authenticated
+        // sender against the call's actual peer costs nothing and stops mattering less by
+        // accident the moment callId's privacy assumptions ever change (e.g. a future group-call
+        // feature with a shared/predictable call identifier).
+        if (signal.peerDhIdentityKey.toHex() != remotePeerKeyHex) return
         val pc = peerConnection ?: return
         ringTimeoutJob?.cancel()
         ringTimeoutJob = null
@@ -410,8 +416,8 @@ class CallManager(private val appContext: Context, private val appState: AppStat
     }
 
     private fun handleIceCandidate(signal: IncomingCallSignal.Signal) {
-        if (signal.callId != currentCallId) {
-            VoronLog.d(TAG, "dropping ICE candidate for a stale/mismatched callId")
+        if (signal.callId != currentCallId || signal.peerDhIdentityKey.toHex() != remotePeerKeyHex) {
+            VoronLog.d(TAG, "dropping ICE candidate for a stale/mismatched callId or peer")
             return
         }
         val parts = signal.payload.split("\n", limit = 3)
@@ -446,7 +452,7 @@ class CallManager(private val appContext: Context, private val appState: AppStat
 
     private fun handleHangup(signal: IncomingCallSignal.Signal) {
         VoronLog.d(TAG, "HANGUP received, reason=${signal.payload}")
-        if (signal.callId != currentCallId) return
+        if (signal.callId != currentCallId || signal.peerDhIdentityKey.toHex() != remotePeerKeyHex) return
         endCall("remote hangup, reason=${signal.payload}")
         appState.activeCall = null
     }

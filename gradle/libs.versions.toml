@@ -2,6 +2,7 @@
 kotlin = "2.1.0"
 ktor = "3.0.3"
 noise = "0.1.1"
+bouncycastle = "1.85"
 logback = "1.5.18"
 kotlinx-coroutines = "1.9.0"
 junit = "5.11.3"
@@ -35,6 +36,7 @@ ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "kto
 ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor" }
 ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
 noise-java = { module = "org.signal.forks:noise-java", version.ref = "noise" }
+bouncycastle-provider = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }

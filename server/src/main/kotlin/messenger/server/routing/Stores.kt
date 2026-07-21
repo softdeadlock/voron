@@ -18,6 +18,9 @@ interface MailboxStore {
 interface PreKeyDirectoryStore {
     fun publish(deviceKeyHex: String, published: PublishedPreKeys)
     fun fetch(deviceKeyHex: String): PreKeyBundle?
+
+    /** Whether [deviceKeyHex] has ever published a bundle -- unlike [fetch], never consumes a one-time prekey, so it's safe to call just to check "is this a real device key" (see [registerAlias]'s hijack-prevention check). */
+    fun contains(deviceKeyHex: String): Boolean
 }
 
 interface PushEndpointStore {

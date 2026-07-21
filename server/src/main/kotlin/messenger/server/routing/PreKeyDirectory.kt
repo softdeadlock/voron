@@ -36,6 +36,8 @@ class PreKeyDirectory(maxDevices: Int = 10_000) : PreKeyDirectoryStore {
         entries[deviceKeyHex] = Entry(published)
     }
 
+    override fun contains(deviceKeyHex: String): Boolean = entries.containsKey(deviceKeyHex)
+
     /** Builds a fetchable bundle for [deviceKeyHex], consuming one one-time prekey if any remain. */
     override fun fetch(deviceKeyHex: String): PreKeyBundle? {
         val entry = entries[deviceKeyHex] ?: return null

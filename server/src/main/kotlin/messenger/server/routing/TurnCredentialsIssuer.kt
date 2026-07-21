@@ -37,6 +37,14 @@ class TurnCredentialsIssuer(private val appName: String, private val secretKey: 
     // one set of credentials. Same LRU-capped-map idiom as Mailbox/PushNotifier's own throttles.
     private val lastMintedAt = Collections.synchronizedMap(lruCappedMap<String, Long>(10_000))
 
+    // SECURITY (audit finding, 2026-07-21): the per-device cooldown above only bounds how fast
+    // *one* device can mint -- it does nothing against many cheap, unauthenticated connections
+    // (up to the relay's own connection cap) each minting once every cooldown window, which
+    // aggregately can exhaust the operator's real Metered.ca account quota/cost far faster than a
+    // single device spamming ever could. This is a global budget on top, independent of deviceHex.
+    private val globalMintTimestamps = java.util.ArrayDeque<Long>()
+    private val globalMintLock = Any()
+
     suspend fun mint(deviceHex: String): TurnCredentials? {
         val now = System.currentTimeMillis()
         val throttled = synchronized(lastMintedAt) {
@@ -50,6 +58,22 @@ class TurnCredentialsIssuer(private val appName: String, private val secretKey: 
         }
         if (throttled) {
             logger.info("throttling TURN credential mint for $deviceHex (asked again too soon)")
+            return null
+        }
+
+        val globallyThrottled = synchronized(globalMintLock) {
+            while (globalMintTimestamps.isNotEmpty() && now - globalMintTimestamps.peekFirst() > GLOBAL_BUDGET_WINDOW_MILLIS) {
+                globalMintTimestamps.pollFirst()
+            }
+            if (globalMintTimestamps.size >= GLOBAL_BUDGET_MAX_MINTS) {
+                true
+            } else {
+                globalMintTimestamps.addLast(now)
+                false
+            }
+        }
+        if (globallyThrottled) {
+            logger.warn("throttling TURN credential mint for $deviceHex: relay-wide mint budget exhausted")
             return null
         }
 
@@ -89,5 +113,9 @@ class TurnCredentialsIssuer(private val appName: String, private val secretKey: 
         // useless well before anyone could act on it.
         const val CREDENTIAL_LIFETIME_SECONDS = 600
         const val MINT_COOLDOWN_MILLIS = 5_000L
+        // 120/minute is comfortably above any real deployment's concurrent-call rate (each call
+        // mints once) while still capping worst-case cost if every connection slot tried at once.
+        const val GLOBAL_BUDGET_MAX_MINTS = 120
+        const val GLOBAL_BUDGET_WINDOW_MILLIS = 60_000L
     }
 }

@@ -59,6 +59,11 @@ fun Application.configureRouting(
 ) {
     val groupEventRateLimiter = GroupEventRateLimiter()
     val preKeyFetchRateLimiter = GroupEventRateLimiter(maxEvents = 30, windowMillis = 10_000L)
+    // SECURITY (audit finding, 2026-07-21): REGISTER_ALIAS was the one authenticated frame type
+    // with no rate limit at all -- see AliasStore's own doc for the memory-exhaustion half of this;
+    // this is the "how fast" half, same reasoning as preKeyFetchRateLimiter.
+    val aliasRegistrationRateLimiter = GroupEventRateLimiter(maxEvents = 10, windowMillis = 10_000L)
+    val aliasStore = AliasStore()
     // DoS: a Noise_IK handshake attempt is cheap for whoever's sending it (just a fresh ephemeral
     // keypair) but not free for this relay to process, and nothing capped how many could be in
     // flight or held open at once before this -- an attacker opening many sockets and either
@@ -203,7 +208,7 @@ fun Application.configureRouting(
                                 logger.info("dropping frame that failed to authenticate from ${connection.staticPublicKeyHex}")
                                 continue
                             }
-                            handleFrame(connection, plaintext, registry, preKeys, mailbox, pushRegistry, pushNotifier, turnCredentialsIssuer, groupEventRateLimiter, preKeyFetchRateLimiter)
+                            handleFrame(connection, plaintext, registry, preKeys, mailbox, pushRegistry, pushNotifier, turnCredentialsIssuer, groupEventRateLimiter, preKeyFetchRateLimiter, aliasStore, aliasRegistrationRateLimiter)
                         }
                     } finally {
                         writer.cancel()
@@ -261,6 +266,8 @@ private suspend fun handleFrame(
     turnCredentialsIssuer: TurnCredentialsIssuer?,
     groupEventRateLimiter: GroupEventRateLimiter,
     preKeyFetchRateLimiter: GroupEventRateLimiter,
+    aliasStore: AliasStore,
+    aliasRegistrationRateLimiter: GroupEventRateLimiter,
 ) {
     val decoded = try {
         TransportFrame.decode(plaintext)
@@ -291,11 +298,19 @@ private suspend fun handleFrame(
         TransportFrame.ROUTE, TransportFrame.SESSION_RESET_NOTICE, TransportFrame.DELIVERY_ACK,
         TransportFrame.READ_ACK, TransportFrame.REACTION, TransportFrame.EDIT_MESSAGE,
         TransportFrame.GROUP_SENDER_KEY, TransportFrame.GROUP_MESSAGE, TransportFrame.GROUP_KEY_REQUEST,
-        TransportFrame.GROUP_CONTROL_EVENT, TransportFrame.GROUP_CONTROL_SYNC_REQUEST, TransportFrame.GROUP_JOIN_REQUEST ->
-            routeMessage(from, decoded.body, registry, mailbox, pushRegistry, pushNotifier, decoded.type)
-        TransportFrame.CALL_SIGNAL -> routeCallSignal(from, decoded.body, registry, mailbox, pushRegistry, pushNotifier)
-        TransportFrame.FILE_TRANSFER -> routeFileTransfer(from, decoded.body, registry)
-        TransportFrame.TYPING_INDICATOR -> routeEphemeral(from, decoded.body, registry, TransportFrame.TYPING_INDICATOR)
+        TransportFrame.GROUP_CONTROL_EVENT, TransportFrame.GROUP_CONTROL_SYNC_REQUEST, TransportFrame.GROUP_JOIN_REQUEST,
+        TransportFrame.ALIAS_UPDATE ->
+            routeMessage(from, decoded.body, registry, mailbox, pushRegistry, pushNotifier, decoded.type, aliasStore)
+        TransportFrame.CALL_SIGNAL -> routeCallSignal(from, decoded.body, registry, mailbox, pushRegistry, pushNotifier, aliasStore)
+        TransportFrame.FILE_TRANSFER -> routeFileTransfer(from, decoded.body, registry, aliasStore)
+        TransportFrame.TYPING_INDICATOR -> routeEphemeral(from, decoded.body, registry, TransportFrame.TYPING_INDICATOR, aliasStore)
+        TransportFrame.REGISTER_ALIAS -> {
+            if (aliasRegistrationRateLimiter.allow(from.staticPublicKeyHex)) {
+                registerAlias(from, decoded.body, aliasStore, registry, preKeys)
+            } else {
+                logger.info("rate-limiting alias registration from ${from.staticPublicKeyHex}")
+            }
+        }
         TransportFrame.PUBLISH_PREKEYS -> publishPreKeys(from, decoded.body, preKeys)
         // DoS: PreKeyDirectory.fetch() pops one one-time prekey off the target's pool per call --
         // with no cap, any connected device could name any target and burn through their whole OTP
@@ -327,20 +342,65 @@ private fun registerPush(from: Connection, body: ByteArray, pushRegistry: PushEn
 /** The shared first step of every route*: the envelope decoded, its header swapped for [Connection.staticPublicKeyHex] (the authenticated sender), and re-encoded as an outbound frame. */
 private class RoutedFrame(val recipientHex: String, val recipientKey: ByteArray, val frame: ByteArray)
 
-/** Decodes [body]'s [RoutingEnvelope] and rewraps it for delivery as a [frameType] frame — null (frame dropped, logged) on malformed input. */
-private fun rewrapForRecipient(from: Connection, body: ByteArray, frameType: Byte, label: String): RoutedFrame? {
+/**
+ * Decodes [body]'s [RoutingEnvelope] and rewraps it for delivery as a [frameType] frame — null
+ * (frame dropped, logged) on malformed input. The envelope's header may be either a real static
+ * key or a live [AliasStore] alias; [aliasStore] resolves the latter to the real key it currently
+ * stands for before anything downstream (registry lookup, mailboxing) ever sees it, so callers
+ * never need to know or care which kind of header a given sender used.
+ */
+private fun rewrapForRecipient(from: Connection, body: ByteArray, frameType: Byte, label: String, aliasStore: AliasStore): RoutedFrame? {
     val envelope = try {
         RoutingEnvelope.decode(body)
     } catch (e: IllegalArgumentException) {
         logger.info("dropping malformed $label envelope from ${from.staticPublicKeyHex}")
         return null
     }
+    val headerHex = envelope.peerStaticPublicKey.toHex()
+    val recipientHex = aliasStore.resolve(headerHex) ?: headerHex
     val outbound = RoutingEnvelope.encode(from.staticPublicKeyHex.hexToByteArray(), envelope.payload)
     return RoutedFrame(
-        recipientHex = envelope.peerStaticPublicKey.toHex(),
-        recipientKey = envelope.peerStaticPublicKey,
+        recipientHex = recipientHex,
+        recipientKey = recipientHex.hexToByteArray(),
         frame = TransportFrame.encode(frameType, outbound),
     )
+}
+
+/**
+ * Registers [body] (a 32-byte random routing alias) as currently resolving to [from]'s real
+ * static key — see [AliasStore].
+ *
+ * SECURITY (audit finding, 2026-07-21, exploit PoC in AliasHijackExploitTest): device static keys
+ * are never secret — any authenticated device can learn any other device's real key via
+ * [FETCH_PREKEYS][TransportFrame.FETCH_PREKEYS] or a QR scan — so registering an alias equal to
+ * someone else's real key used to let any device silently steal all traffic addressed to that
+ * real key by the literal/fallback path (the default addressing mode for a first contact, or
+ * anyone who hasn't yet received that victim's rotating alias). Rejecting a collision against
+ * [registry] (currently-connected real devices) closes this whenever the victim is online right
+ * now; rejecting a collision against [preKeys] (every device that has ever published a bundle —
+ * which happens automatically on every connect, see `ConnectionManager.openConnection`) closes it
+ * for the much larger set of devices that have *ever* connected, online or not, without requiring
+ * a live connection to check against. Neither check is a byte-for-byte impossible bypass (a
+ * device that has genuinely never connected once has no prekey-directory entry to collide with),
+ * but that's also a device nobody could have targeted for impersonation in the first place, since
+ * nobody could FETCH_PREKEYS for it either. There's also a narrow TOCTOU window on a device's
+ * very first-ever connection: an attacker who already knows its real key (again, only possible if
+ * someone had a reason to FETCH_PREKEYS for it, which itself implies it isn't brand new to them)
+ * could in principle win a race between this check and [registry] actually registering that
+ * device's connection. Not practically exploitable in the threat model this closes, but this
+ * function's checks are a strong deterrent, not a formally-proven-atomic guarantee.
+ */
+internal fun registerAlias(from: Connection, body: ByteArray, aliasStore: AliasStore, registry: ConnectionRegistry, preKeys: PreKeyDirectoryStore) {
+    if (body.size != RoutingEnvelope.PEER_KEY_LENGTH) {
+        logger.info("dropping malformed alias registration from ${from.staticPublicKeyHex}")
+        return
+    }
+    val aliasHex = body.toHex()
+    if (registry.find(aliasHex) != null || preKeys.contains(aliasHex)) {
+        logger.info("rejecting alias registration from ${from.staticPublicKeyHex}: collides with a real device key")
+        return
+    }
+    aliasStore.register(aliasHex, from.staticPublicKeyHex)
 }
 
 /** Forwards a [RoutingEnvelope]-shaped frame to its target, replacing the header with [from]'s key; [frameType] is preserved on the wire so the recipient dispatches it the same way the sender tagged it (e.g. ROUTE vs SESSION_RESET_NOTICE). */
@@ -352,8 +412,9 @@ internal fun routeMessage(
     pushRegistry: PushEndpointStore,
     pushNotifier: PushNotifier,
     frameType: Byte = TransportFrame.ROUTE,
+    aliasStore: AliasStore,
 ) {
-    val routed = rewrapForRecipient(from, body, frameType, "routed") ?: return
+    val routed = rewrapForRecipient(from, body, frameType, "routed", aliasStore) ?: return
     val recipientHex = routed.recipientHex
     val frame = routed.frame
 
@@ -396,8 +457,9 @@ internal fun routeCallSignal(
     mailbox: MailboxStore,
     pushRegistry: PushEndpointStore,
     pushNotifier: PushNotifier,
+    aliasStore: AliasStore,
 ) {
-    val routed = rewrapForRecipient(from, body, TransportFrame.CALL_SIGNAL, "call-signal") ?: return
+    val routed = rewrapForRecipient(from, body, TransportFrame.CALL_SIGNAL, "call-signal", aliasStore) ?: return
 
     val recipient = registry.find(routed.recipientHex)
     val delivered = recipient != null && recipient.outgoing.trySend(routed.frame).isSuccess
@@ -422,8 +484,8 @@ internal fun routeCallSignal(
  * only ever exist on the two endpoints, transiting here in RAM and never touching disk/Postgres.
  * This is the "файлы хранятся только у сторон, минуя сервер" guarantee.
  */
-internal fun routeFileTransfer(from: Connection, body: ByteArray, registry: ConnectionRegistry) {
-    val routed = rewrapForRecipient(from, body, TransportFrame.FILE_TRANSFER, "file-transfer") ?: return
+internal fun routeFileTransfer(from: Connection, body: ByteArray, registry: ConnectionRegistry, aliasStore: AliasStore) {
+    val routed = rewrapForRecipient(from, body, TransportFrame.FILE_TRANSFER, "file-transfer", aliasStore) ?: return
 
     val recipient = registry.find(routed.recipientHex)
     val delivered = recipient != null && recipient.outgoing.trySend(routed.frame).isSuccess
@@ -439,8 +501,8 @@ internal fun routeFileTransfer(from: Connection, body: ByteArray, registry: Conn
  * signals that are worthless once stale (currently just [TransportFrame.TYPING_INDICATOR]).
  * Silently dropped if the recipient isn't connected right now.
  */
-internal fun routeEphemeral(from: Connection, body: ByteArray, registry: ConnectionRegistry, frameType: Byte) {
-    val routed = rewrapForRecipient(from, body, frameType, "ephemeral") ?: return
+internal fun routeEphemeral(from: Connection, body: ByteArray, registry: ConnectionRegistry, frameType: Byte, aliasStore: AliasStore) {
+    val routed = rewrapForRecipient(from, body, frameType, "ephemeral", aliasStore) ?: return
     registry.find(routed.recipientHex)?.outgoing?.trySend(routed.frame)
 }
 

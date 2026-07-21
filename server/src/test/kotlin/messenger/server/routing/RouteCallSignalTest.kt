@@ -39,6 +39,7 @@ class RouteCallSignalTest {
             Mailbox(),
             PushRegistry(),
             PushNotifier(),
+            AliasStore(),
         )
 
         val live = recipient.outgoing.tryReceive().getOrNull()!!
@@ -64,6 +65,7 @@ class RouteCallSignalTest {
             mailbox,
             PushRegistry(),
             PushNotifier(),
+            AliasStore(),
         )
 
         val reply = sender.outgoing.tryReceive().getOrNull()!!
@@ -91,6 +93,7 @@ class RouteCallSignalTest {
             mailbox,
             pushRegistry,
             PushNotifier(),
+            AliasStore(),
         )
 
         // No immediate CALL_UNAVAILABLE — the caller should keep ringing while the push wakes the callee.

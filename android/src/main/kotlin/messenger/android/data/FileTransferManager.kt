@@ -27,6 +27,17 @@ private const val TAG = "VoronFile"
 private const val SEND_WINDOW = 8
 private const val ACCEPT_TIMEOUT_MILLIS = 30_000L
 
+// SECURITY (audit finding, 2026-07-21): handleOffer auto-ACCEPTs every incoming OFFER with no user
+// confirmation and no cap on how many can be in flight at once -- any device that knows a victim's
+// device key (learnable via FETCH_PREKEYS by any authenticated connection, no contact relationship
+// required) could send unlimited OFFERs across distinct fileIds, each opening a real file handle +
+// disk allocation (up to ~3.2GB, MAX_TOTAL_CHUNKS) and simply never sending chunks, exhausting disk
+// and file descriptors. MAX_CONCURRENT_INCOMING_TRANSFERS bounds how many can exist at once; the
+// stall sweep reclaims ones that stopped receiving chunks instead of holding them forever.
+private const val MAX_CONCURRENT_INCOMING_TRANSFERS = 20
+private const val STALL_TIMEOUT_MILLIS = 2 * 60_000L
+private const val STALL_SWEEP_INTERVAL_MILLIS = 30_000L
+
 /**
  * 1:1 file transfer with the "файлы хранятся только у сторон, минуя сервер" guarantee: bytes are
  * E2EE-chunked and streamed over the same relay pipe as messages, but the relay routes each chunk
@@ -65,6 +76,21 @@ class FileTransferManager(private val appContext: Context, private val appState:
         val received: BooleanArray,
     ) {
         var receivedCount = 0
+        @Volatile var lastActivityMillis = System.currentTimeMillis()
+    }
+
+    init {
+        scope.launch {
+            while (true) {
+                delay(STALL_SWEEP_INTERVAL_MILLIS)
+                val now = System.currentTimeMillis()
+                val stale = incoming.values.filter { now - it.lastActivityMillis > STALL_TIMEOUT_MILLIS }
+                for (transfer in stale) {
+                    VoronLog.w(TAG, "reaping stalled incoming transfer ${transfer.fileId} (no chunk in ${STALL_TIMEOUT_MILLIS / 1000}s)")
+                    failIncoming(transfer.fileId)
+                }
+            }
+        }
     }
 
     private fun mediaDir(): File = File(appContext.filesDir, "media").apply { mkdirs() }
@@ -231,6 +257,10 @@ class FileTransferManager(private val appContext: Context, private val appState:
         val peerKeyHex = signal.peerDhIdentityKey.toHex()
         if (appState.isBlocked(peerKeyHex)) return
         if (incoming.containsKey(signal.fileId)) return
+        if (incoming.size >= MAX_CONCURRENT_INCOMING_TRANSFERS) {
+            VoronLog.w(TAG, "dropping file OFFER from $peerKeyHex: too many concurrent incoming transfers")
+            return
+        }
         val offer = try {
             FileSignal.decodeOffer(signal.payload)
         } catch (e: Exception) {
@@ -272,6 +302,7 @@ class FileTransferManager(private val appContext: Context, private val appState:
 
     private fun handleChunk(signal: IncomingFileSignal.Signal) {
         val transfer = incoming[signal.fileId] ?: return
+        transfer.lastActivityMillis = System.currentTimeMillis()
         val (index, data) = try {
             FileSignal.decodeChunk(signal.payload)
         } catch (e: Exception) {

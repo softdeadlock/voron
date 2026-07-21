@@ -72,6 +72,22 @@ package messenger.common.protocol
  *    [FOUND][2-byte username length][username UTF-8][2-byte password
  *    length][password UTF-8], or just [NOT_FOUND] if the relay has no TURN
  *    provider configured or the mint call failed.
+ *  - [REGISTER_ALIAS]: body is a 32-byte random routing alias this connection
+ *    is now reachable under, in addition to its real static key -- see
+ *    `messenger.server.routing.AliasStore`. Not E2E-encrypted (there's
+ *    nothing to protect: it's a fresh random value, meaningless until this
+ *    same device tells a contact about it over an already-encrypted
+ *    channel). Every [ROUTE]-family frame's [RoutingEnvelope] header may
+ *    from now on be either a real static key (legacy/fallback) or one of
+ *    these aliases -- the relay resolves either the same way before
+ *    routing/mailboxing, so nothing downstream needs to know which kind it
+ *    got.
+ *  - [ALIAS_UPDATE]: body is a [RoutingEnvelope] whose payload is E2E-opaque
+ *    (the new 32-byte alias), relayed and mailboxed like [ROUTE]. Tells one
+ *    specific contact this device's current alias, so they can address
+ *    future [ROUTE]-family frames to that alias instead of this device's
+ *    real static key -- the relay only ever learns "some device rotated
+ *    some alias," never which of a sender's contacts was told.
  */
 object TransportFrame {
     const val ROUTE: Byte = 0x01
@@ -97,6 +113,8 @@ object TransportFrame {
     const val GROUP_JOIN_REQUEST: Byte = 0x15
     const val TURN_CREDENTIALS_REQUEST: Byte = 0x16
     const val TURN_CREDENTIALS_RESULT: Byte = 0x17
+    const val REGISTER_ALIAS: Byte = 0x18
+    const val ALIAS_UPDATE: Byte = 0x19
 
     const val RESULT_FOUND: Byte = 0x01
     const val RESULT_NOT_FOUND: Byte = 0x00

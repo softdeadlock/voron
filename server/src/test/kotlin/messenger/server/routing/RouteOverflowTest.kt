@@ -36,8 +36,8 @@ class RouteOverflowTest {
 
         fun envelopeTo(text: String) = RoutingEnvelope.encode(recipientDevice.publicKey, text.toByteArray())
 
-        routeMessage(sender, envelopeTo("fits"), registry, mailbox, PushRegistry(), PushNotifier())
-        routeMessage(sender, envelopeTo("overflows"), registry, mailbox, PushRegistry(), PushNotifier())
+        routeMessage(sender, envelopeTo("fits"), registry, mailbox, PushRegistry(), PushNotifier(), aliasStore = AliasStore())
+        routeMessage(sender, envelopeTo("overflows"), registry, mailbox, PushRegistry(), PushNotifier(), aliasStore = AliasStore())
 
         // First frame is in the live channel...
         val live = recipient.outgoing.tryReceive().getOrNull()!!
@@ -70,6 +70,7 @@ class RouteOverflowTest {
             mailbox,
             PushRegistry(),
             PushNotifier(),
+            aliasStore = AliasStore(),
         )
 
         val queued = mailbox.drain(recipientDevice.publicKey.toHex())

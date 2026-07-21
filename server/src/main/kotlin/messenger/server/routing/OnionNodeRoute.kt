@@ -18,6 +18,7 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readBytes
 import java.util.Base64
+import java.util.concurrent.Semaphore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.coroutineScope
@@ -48,6 +49,14 @@ private val logger = LoggerFactory.getLogger("messenger.server.routing.OnionNode
 fun Application.configureOnionNode(nodeIdentity: NoiseStaticKeyPair, nextHopUrl: String, forwardEphemeralKey: Boolean) {
     val outboundClient = HttpClient(CIO) { install(ClientWebSockets) }
 
+    // SECURITY (audit finding, 2026-07-21): the main relay's /v1/connect has this same cap (see
+    // Application.kt/Routes.kt's own doc) specifically because completing a handshake here is
+    // cheap and requires no allowlist -- this onion hop had no equivalent at all, and every
+    // accepted connection here also opens an *outbound* WebSocket to the next hop, so flooding one
+    // node cascades resource exhaustion onto the whole circuit, including the real backend relay.
+    val maxConcurrentConnections = System.getenv("VORON_ONION_MAX_CONNECTIONS")?.toIntOrNull() ?: 20_000
+    val connectionSlots = Semaphore(maxConcurrentConnections)
+
     install(WebSockets) {
         pingPeriodMillis = 15_000
         timeoutMillis = 30_000
@@ -67,6 +76,12 @@ fun Application.configureOnionNode(nodeIdentity: NoiseStaticKeyPair, nextHopUrl:
         }
 
         webSocket("/v1/onion-relay") {
+            if (!connectionSlots.tryAcquire()) {
+                logger.info("rejecting onion connection: at capacity ($maxConcurrentConnections)")
+                close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "node at capacity"))
+                return@webSocket
+            }
+            try {
             val ekParam = call.request.queryParameters["ek"]
             val clientEphemeralPublic = ekParam?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
             if (clientEphemeralPublic == null || clientEphemeralPublic.size != X25519.KEY_LENGTH) {
@@ -121,6 +136,9 @@ fun Application.configureOnionNode(nodeIdentity: NoiseStaticKeyPair, nextHopUrl:
                 throw e
             } finally {
                 nextHop.close()
+            }
+            } finally {
+                connectionSlots.release()
             }
         }
     }

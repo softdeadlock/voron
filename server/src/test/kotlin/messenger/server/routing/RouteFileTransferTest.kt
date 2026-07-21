@@ -31,7 +31,7 @@ class RouteFileTransferTest {
         val registry = ConnectionRegistry()
         registry.register(recipient)
 
-        routeFileTransfer(sender, RoutingEnvelope.encode(recipientDevice.publicKey, "chunk".toByteArray()), registry)
+        routeFileTransfer(sender, RoutingEnvelope.encode(recipientDevice.publicKey, "chunk".toByteArray()), registry, AliasStore())
 
         val live = recipient.outgoing.tryReceive().getOrNull()!!
         val decoded = TransportFrame.decode(live)
@@ -47,7 +47,7 @@ class RouteFileTransferTest {
 
         val registry = ConnectionRegistry() // recipient offline
 
-        routeFileTransfer(sender, RoutingEnvelope.encode(recipientKey, "chunk".toByteArray()), registry)
+        routeFileTransfer(sender, RoutingEnvelope.encode(recipientKey, "chunk".toByteArray()), registry, AliasStore())
 
         val reply = sender.outgoing.tryReceive().getOrNull()!!
         val decoded = TransportFrame.decode(reply)

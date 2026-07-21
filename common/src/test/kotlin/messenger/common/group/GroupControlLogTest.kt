@@ -2,6 +2,7 @@ package messenger.common.group
 
 import kotlin.random.Random
 import messenger.common.crypto.Ed25519Signatures
+import messenger.common.util.hexToByteArray
 import messenger.common.util.toHex
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -314,5 +315,37 @@ class GroupControlLogTest {
         for (event in log.eventsInCanonicalOrder()) replayed.ingest(event)
 
         assertEquals(log.state, replayed.state)
+    }
+
+    // CRASH (found via live device testing, 2026-07-21): a joining member pins the invite's signed
+    // genesis hash via expectGenesis() before the CREATE_GROUP event carrying that hash has
+    // necessarily arrived -- ingesting some other, later control event first (plausible: network
+    // reordering, or the creator hasn't synced genesis to a relay this device already has a
+    // connection through) used to crash with a bare NoSuchElementException out of recompute().
+    @Test
+    fun `ingesting a non-genesis event before the pinned genesis event has arrived does not crash`() {
+        val groupId = fakeGroupId()
+        val owner = Identity()
+        val alice = Identity()
+        val log = GroupControlLog(groupId)
+
+        // Pin the genesis hash the way a joiner does from GroupInvite.genesisHash, before ever
+        // ingesting anything.
+        val genesisEvent = genesis(groupId, owner)
+        log.expectGenesis(genesisEvent.hashHex().hexToByteArray())
+
+        // Some later event referencing that not-yet-ingested genesis as its prevEventHash arrives
+        // first -- must not crash, and must not fabricate any state out of it.
+        val addBeforeGenesis = GroupControlEvent.create(
+            groupId, genesisEvent.hashHex().hexToByteArray(), GroupEventType.ADD_MEMBER, owner.dhKey, owner.signingKeyPair,
+            GroupEventPayloads.encodeAddMember(alice.dhKey, alice.signingKeyPair.publicKey),
+        )
+        log.ingest(addBeforeGenesis)
+        assertEquals(GroupState.empty(groupId), log.state)
+
+        // Once genesis actually arrives, the log recovers and reaches the same state either order would.
+        log.ingest(genesisEvent)
+        assertTrue(log.state.members.containsKey(owner.dhKey.toHex()))
+        assertTrue(log.state.members.containsKey(alice.dhKey.toHex()))
     }
 }

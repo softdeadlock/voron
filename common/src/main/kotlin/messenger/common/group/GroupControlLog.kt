@@ -130,7 +130,15 @@ class GroupControlLog(val groupId: ByteArray) {
                 ?.filter { eventsByHash[it]?.eventType == GroupEventType.CREATE_GROUP }
                 ?.minOrNull()
         }
-        var current = pinnedGenesisHash ?: return path
+        // CRASH (found via live device testing): pinnedGenesisHash can be set by expectGenesis()
+        // before the actual genesis event has ever been ingested (a joiner pins the invite's
+        // signed genesis hash immediately, but the CREATE_GROUP event carrying that hash may
+        // arrive later, or never, e.g. reordered delivery or the group creator hasn't synced it
+        // yet). Falling through with a pinned-but-not-yet-seen hash used to add it to path anyway,
+        // then crash on recompute()'s eventsByHash.getValue(hash) below with a bare
+        // NoSuchElementException. No canonical path exists yet in that case -- same as "nothing
+        // pinned at all" -- so this is not a special case, just the same fallback.
+        var current = pinnedGenesisHash?.takeIf { eventsByHash.containsKey(it) } ?: return path
         path += current
         while (true) {
             val next = childrenOf[current]?.minOrNull() ?: break
