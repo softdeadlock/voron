@@ -81,6 +81,7 @@ class VoronActions(
     val connect: () -> Unit,
     val sendMessage: (peerKeyHex: String, text: String, replyTo: ChatMessage?, linkPreview: ApplicationMessage.LinkPreviewRef?) -> Unit,
     val fetchLinkPreview: suspend (String) -> ApplicationMessage.LinkPreviewRef?,
+    val fetchCanary: suspend () -> messenger.android.data.CanaryInfo?,
     val sendFile: (peerKeyHex: String, uri: Uri) -> Unit,
     val sendVoiceMessage: (peerKeyHex: String, file: File, durationMillis: Long) -> Unit,
     val sendSticker: (peerKeyHex: String, sticker: StickerId) -> Unit,
@@ -342,6 +343,7 @@ private fun VoronMainContent(
                 appLockEnabled = appState.appLockEnabled,
                 onAppLockChange = actions.setAppLock,
                 appVersionLabel = appVersionLabel,
+                onFetchCanary = actions.fetchCanary,
                 onBack = {
                     if (navController.currentBackStackEntry?.isResumed() != false) {
                         navController.popBackStack()
@@ -359,7 +361,15 @@ private fun VoronMainContent(
                 peerAvatarIconId = appState.avatarIconFor(peerKeyHex),
                 isVerified = appState.isVerified(peerKeyHex),
                 ownSigningKeyHex = appState.client?.identity?.signingIdentityPublicKey?.toHex(),
-                peerSigningKeyHex = appState.client?.pinnedSigningIdentityKeyFor(peerKeyHex.hexToByteArray())?.toHex(),
+                // CRASH: peerKeyHex is DRAFTS_DEVICE_KEY ("drafts", not valid hex) for the local
+                // self-notes chat, which never goes through hexToByteArray() anywhere else in this
+                // file precisely because it isn't a real device key -- this composable is reached
+                // for that chat too (see the isDrafts branching inside ChatDetailScreen itself).
+                peerSigningKeyHex = if (peerKeyHex == DRAFTS_DEVICE_KEY) {
+                    null
+                } else {
+                    appState.client?.pinnedSigningIdentityKeyFor(peerKeyHex.hexToByteArray())?.toHex()
+                },
                 messages = appState.conversationFor(peerKeyHex),
                 messageInput = messageInput,
                 onMessageInputChange = {

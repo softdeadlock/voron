@@ -2,6 +2,7 @@ package messenger.android.ui.screens
 
 import android.content.Intent
 import android.provider.Settings as AndroidSettings
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -102,10 +103,15 @@ fun SettingsScreen(
     appLockEnabled: Boolean,
     onAppLockChange: (Boolean) -> Unit,
     appVersionLabel: String,
+    onFetchCanary: suspend () -> messenger.android.data.CanaryInfo?,
     onBack: () -> Unit,
 ) {
     var showClearHistory by remember { mutableStateOf(false) }
     var showExportBackup by remember { mutableStateOf(false) }
+    var showCanary by remember { mutableStateOf(false) }
+    var canaryInfo by remember { mutableStateOf<messenger.android.data.CanaryInfo?>(null) }
+    var canaryLoading by remember { mutableStateOf(false) }
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     var showRestoreBackup by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -356,8 +362,31 @@ fun SettingsScreen(
             Spacer(Modifier.height(28.dp))
             SectionLabel("About")
             ActionCard(icon = Icons.Filled.Info, label = "Voron", detail = appVersionLabel, onClick = null)
+            ActionCard(
+                icon = Icons.Filled.Fingerprint,
+                label = "Warrant canary",
+                detail = "A manually-renewed statement from the relay operator",
+                onClick = {
+                    showCanary = true
+                    if (canaryInfo == null && !canaryLoading) {
+                        canaryLoading = true
+                        coroutineScope.launch {
+                            canaryInfo = onFetchCanary()
+                            canaryLoading = false
+                        }
+                    }
+                },
+            )
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showCanary) {
+        CanarySheet(
+            info = canaryInfo,
+            loading = canaryLoading,
+            onDismiss = { showCanary = false },
+        )
     }
 
     if (showClearHistory) {

@@ -29,6 +29,25 @@ import org.slf4j.LoggerFactory
 
 private val logger = LoggerFactory.getLogger("messenger.server.routing.Routes")
 
+private const val DEFAULT_CANARY_STATEMENT =
+    "As of this date, the operator of this relay has not received any national security letter, " +
+        "gag order, or other secret legal demand requiring it to disclose user data, backdoor this " +
+        "software, or covertly assist surveillance of any kind -- and has not been compelled to " +
+        "hand over any private keys, message content, or metadata beyond what this relay ever holds " +
+        "in the first place (see the project's own docs for what that is). This statement is renewed " +
+        "periodically. If it stops being renewed, or its wording changes in a way that quietly drops " +
+        "any of the above, treat that absence itself as the signal."
+
+// Fallback "as of" if the operator hasn't set CANARY_AS_OF -- process start time, so an operator who
+// forgets to configure it at least gets a visibly-recent (not stale-looking-but-wrong) timestamp,
+// though setting the env var explicitly on each real renewal is what actually makes this meaningful.
+private val canaryDeployedAtMillis = System.currentTimeMillis()
+
+private fun jsonString(value: String): String {
+    val escaped = value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    return "\"$escaped\""
+}
+
 fun Application.configureRouting(
     relayIdentity: NoiseStaticKeyPair,
     registry: ConnectionRegistry,
@@ -59,6 +78,21 @@ fun Application.configureRouting(
             val publicKeyB64 = Base64.getEncoder().encodeToString(relayIdentity.publicKey)
             call.respondText(
                 """{"staticPublicKey":"$publicKeyB64"}""",
+                ContentType.Application.Json,
+            )
+        }
+
+        // Warrant canary: a periodically-renewed statement the operator manually updates (see
+        // CANARY_STATEMENT/CANARY_AS_OF env vars) affirming no secret legal order has been received.
+        // The signal isn't cryptographic -- it's that this statement keeps being renewed at all, and
+        // by a human who can be legally barred from saying otherwise but not (in most jurisdictions)
+        // compelled to keep lying by omission indefinitely. If asOfMillis stops advancing, or this
+        // statement disappears/changes wording unexpectedly, treat that itself as the signal.
+        get("/v1/canary") {
+            val statement = System.getenv("CANARY_STATEMENT") ?: DEFAULT_CANARY_STATEMENT
+            val asOfMillis = System.getenv("CANARY_AS_OF")?.toLongOrNull() ?: canaryDeployedAtMillis
+            call.respondText(
+                """{"statement":${jsonString(statement)},"asOfMillis":$asOfMillis}""",
                 ContentType.Application.Json,
             )
         }

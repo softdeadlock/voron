@@ -66,6 +66,7 @@ class ConnectionManager(
 
     private val updateManager by lazy { UpdateManager(appContext, appState, httpClient) }
     private val linkPreviewFetcher by lazy { LinkPreviewFetcher(appContext) }
+    private val canaryFetcher by lazy { CanaryFetcher(httpClient) }
 
     // Created once and reused across every reconnect, not just once per process: MessengerClient
     // holds the live E2EE ratchet sessions in memory, so replacing it on each reconnect used to
@@ -224,6 +225,9 @@ class ConnectionManager(
 
     /** Fetches (sender-side only, never the recipient — see [ApplicationMessage.LinkPreviewRef]) a link preview for [url], or null on any failure. */
     suspend fun fetchLinkPreview(url: String) = linkPreviewFetcher.fetch(url)
+
+    /** Fetches the relay's warrant canary (see [CanaryFetcher]) — null on any failure, same best-effort contract as [fetchLinkPreview]. */
+    suspend fun fetchCanary() = canaryFetcher.fetch()
 
     fun sendMessage(peerKeyHex: String, text: String, replyTo: ChatMessage? = null, linkPreview: ApplicationMessage.LinkPreviewRef? = null) {
         // Saved once up front (not inside `outgoing`, which can run twice — once optimistically,

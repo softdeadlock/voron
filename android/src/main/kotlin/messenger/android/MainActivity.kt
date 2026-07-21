@@ -126,6 +126,7 @@ class MainActivity : FragmentActivity() {
             connect = connectionManager::connect,
             sendMessage = connectionManager::sendMessage,
             fetchLinkPreview = connectionManager::fetchLinkPreview,
+            fetchCanary = connectionManager::fetchCanary,
             sendFile = connectionManager::sendFile,
             sendVoiceMessage = connectionManager::sendVoiceMessage,
             sendSticker = connectionManager::sendSticker,
